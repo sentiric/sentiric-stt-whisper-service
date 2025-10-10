@@ -4,13 +4,15 @@ FROM python:3.11-slim-bullseye AS builder
 
 # Gerekli sistem bağımlılıkları
 # build-essential & cmake: CTranslate2 için derleme araçları
-# pkg-config: PyAV gibi C-eklentilerinin kütüphaneleri bulmasını sağlar (KRİTİK DÜZELTME)
+# pkg-config: PyAV gibi C-eklentilerinin kütüphaneleri bulmasını sağlar
+# python3-dev: Python C-eklentilerini derlemek için gerekli başlık dosyaları (KRİTİK VE SON DÜZELTME)
 # ffmpeg ve dev kütüphaneleri: faster-whisper'ın bağımlılığı olan PyAV (av) için
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     pkg-config \
+    python3-dev \
     libopenblas-dev \
     libjemalloc-dev \
     git \
