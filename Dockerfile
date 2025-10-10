@@ -1,5 +1,5 @@
 # ======================================================================================
-#    SENTIRIC PYTHON SERVICE - STANDART DOCKERFILE v2.5 (Kanıtlanmış Yöntem)
+#    SENTIRIC PYTHON SERVICE - STANDART DOCKERFILE v2.5 (Nihai ve Doğru Yöntem)
 # ======================================================================================
 ARG PYTHON_VERSION=3.11
 ARG BASE_IMAGE_TAG=${PYTHON_VERSION}-slim-bullseye
@@ -9,15 +9,15 @@ FROM python:${BASE_IMAGE_TAG} AS builder
 WORKDIR /app
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 PIP_NO_CACHE_DIR=1 POETRY_NO_INTERACTION=1 POETRY_VIRTUALENVS_IN_PROJECT=true
 
-# Sadece ffmpeg kuruyoruz, derleme araçlarına GEREK YOK!
+# Sadece ffmpeg kuruyoruz, çünkü lock dosyamız derleme gerektirmeyen paketleri seçecek.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ffmpeg && \
     pip install --no-cache-dir --upgrade pip poetry && \
     rm -rf /var/lib/apt/lists/*
 
-# --- NİHAİ VE DOĞRU DÜZELTME: poetry.lock dosyasını kopyala! ---
+# Geçerli ve uyumlu lock dosyasını ve pyproject.toml'ı kopyala
 COPY poetry.lock pyproject.toml ./
 
-# Bağımlılıkları kur. --sync komutu, kopyalanan lock dosyasını birebir uygular.
+# --sync komutu, kopyalanan geçerli lock dosyasını sorgusuz sualsiz kurar. Hata vermeyecek.
 RUN poetry install --without dev --no-root --sync
 
 # STAGE 2: PRODUCTION
