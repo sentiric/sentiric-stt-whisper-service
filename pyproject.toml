@@ -9,15 +9,17 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.11"
 fastapi = "^0.111.0"
-uvicorn = {extras = ["standard"], version = "^0.30.1"}
+uvicorn = {extras = ["standard"], version = "^0.29.0"} # Versiyonu stt-service ile hizala
 pydantic = "^2.7.3"
 pydantic-settings = "^2.3.4"
 python-dotenv = "^1.0.1"
 structlog = "^24.2.0"
 grpcio = "^1.64.1"
-# Whisper için yüksek performanslı kütüphane
-ctranslate2 = ">=3.17"
-faster-whisper = "^1.0" 
+
+# Whisper için yüksek performanslı kütüphaneler (stt-service'den alındı)
+faster-whisper = "^1.0.3"
+ctranslate2 = "^4.0.0"
+
 # Protobuf stubs
 sentiric-contracts-py = { git = "https://github.com/sentiric/sentiric-contracts.git", tag = "v1.9.0" }
 
