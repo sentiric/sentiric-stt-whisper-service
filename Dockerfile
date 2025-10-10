@@ -9,7 +9,15 @@ RUN apt-get update && \
     cmake \
     libopenblas-dev \
     libjemalloc-dev \
-    git && \
+    git \
+    # --- ÇÖZÜM: PyAV (av paketi) için gerekli FFmpeg kütüphaneleri EKLENDİ ---
+    ffmpeg \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Poetry kurulumu
@@ -31,6 +39,7 @@ COPY README.md .
 RUN poetry install --no-root --only main
 
 # --- STAGE 2: Production ---
+# --- STAGE 2: Production ---
 FROM python:3.11-slim-bullseye
 
 WORKDIR /app
@@ -40,7 +49,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
     curl \
     ca-certificates \
-    libjemalloc2 && \
+    libjemalloc2 \
+    ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
 # Root olmayan kullanıcı oluştur
