@@ -1,27 +1,26 @@
-# sentiric-stt-whisper-service/app/core/config.py
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 from typing import Optional
 
 class Settings(BaseSettings):
+    # Servis Kimliği
     PROJECT_NAME: str = "Sentiric STT Whisper Service"
-    API_V1_STR: str = "/api/v1"
+    SERVICE_VERSION: str = "1.0.0"
     
-    ENV: str = "production"
-    LOG_LEVEL: str = "INFO"
-    SERVICE_VERSION: str = "0.1.0"
-    
-    # Whisper Motoruna Özgü Ayarlar
+    # Whisper Model Ayarları
     WHISPER_MODEL_SIZE: str = "medium"
-    WHISPER_DEVICE: str = "cpu"
+    WHISPER_DEVICE: str = "cpu"  # "cuda" for GPU
     WHISPER_COMPUTE_TYPE: str = "int8"
     
-    # Streaming için kullanılacak Redis URL'si
-    REDIS_URL: Optional[str] = None 
-
-    model_config = SettingsConfigDict(
-        env_file=".env", 
-        env_file_encoding='utf-8',
-        extra='ignore'
-    )
+    # API Ayarları
+    API_HOST: str = "0.0.0.0"
+    API_PORT: int = 15011
+    
+    # Performans Ayarları
+    MAX_AUDIO_LENGTH: int = 600  # maksimum 10 dakika
+    TARGET_SAMPLE_RATE: int = 16000
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
 
 settings = Settings()

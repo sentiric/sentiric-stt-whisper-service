@@ -1,53 +1,33 @@
-# ======================================================================================
-#    SENTIRIC PYTHON SERVICE - BASİT DOCKERFILE
-# ======================================================================================
-
-# STAGE 1: BUILDER
-FROM python:3.11-slim-bullseye AS builder
-WORKDIR /app
-ENV PIP_BREAK_SYSTEM_PACKAGES=1 PIP_NO_CACHE_DIR=1 POETRY_NO_INTERACTION=1 POETRY_VIRTUALENVS_IN_PROJECT=true
-
-# Gerekli sistem paketlerini kur
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    pkg-config \
-    python3-dev \
-    ffmpeg \
-    libavformat-dev \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavutil-dev \
-    libswscale-dev \
-    libswresample-dev && \
-    pip install --no-cache-dir --upgrade pip poetry && \
-    rm -rf /var/lib/apt/lists/*
-
-COPY pyproject.toml ./
-
-# Poetry ile bağımlılıkları kur
-RUN poetry install --without dev --no-root
-
-# STAGE 2: PRODUCTION
 FROM python:3.11-slim-bullseye
-WORKDIR /app
-ARG GIT_COMMIT="unknown"
-ARG BUILD_DATE="unknown"
-ARG SERVICE_VERSION="0.0.0"
-ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_VERSION} \
-    PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH" HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
-    HF_HOME="/tmp/huggingface_cache"
 
+WORKDIR /app
+
+# Sistem bağımlılıkları - SADECE GEREKLİ OLANLAR
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    netcat-openbsd curl ca-certificates ffmpeg \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-RUN addgroup --system --gid 1001 appgroup && \
-    adduser --system --no-create-home --uid 1001 --ingroup appgroup user
+# Python bağımlılıkları - WHISPER ÖZEL
+RUN pip install --no-cache-dir \
+    fastapi==0.111.0 \
+    uvicorn[standard]==0.29.0 \
+    pydantic==2.7.3 \
+    python-multipart==0.0.9 \
+    structlog==24.1.0 \
+    faster-whisper==1.0.3 \
+    ctranslate2==4.0.0 \
+    soundfile==0.12.1 \
+    librosa==0.10.1 \
+    numpy==1.26.4
 
-COPY --from=builder --chown=user:appgroup /app/.venv ./.venv
-COPY --chown=user:appgroup ./app ./app
+# Uygulama kodunu kopyala
+COPY ./app ./app
+COPY pyproject.toml .
 
-USER user
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:15011/health || exit 1
+
+EXPOSE 15011
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15011", "--no-access-log"]

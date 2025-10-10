@@ -1,47 +1,62 @@
-# sentiric-stt-whisper-service/app/main.py
-from fastapi import FastAPI, Depends, HTTPException, status
 from contextlib import asynccontextmanager
-from app.core.logging import setup_logging
-from app.core.config import settings
 import structlog
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from app.core.config import settings
+from app.core.logging import setup_logging
+from app.api.v1.endpoints import router as api_router
 
 logger = structlog.get_logger(__name__)
 
-# NOT: Model yükleme işlemi yavaş olacağı için lifespan içinde yapılmalıdır.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup
     setup_logging()
-    logger.info("STT Whisper Service başlatılıyor", 
-                version=settings.SERVICE_VERSION, 
-                env=settings.ENV,
-                model=settings.WHISPER_MODEL_SIZE)
+    logger.info(
+        "🚀 STT Whisper Service starting...",
+        version=settings.SERVICE_VERSION,
+        model=settings.WHISPER_MODEL_SIZE
+    )
     
-    # TODO: Model yükleme (Load model into memory)
-    # try:
-    #     global WHISPER_MODEL
-    #     WHISPER_MODEL = load_whisper_model(...)
-    #     logger.info("Whisper modeli başarıyla yüklendi.")
-    # except Exception as e:
-    #     logger.critical("Model yüklenemedi, servis başlatılamıyor.", error=str(e))
-    #     raise e
+    # Model otomatik olarak yüklenecek (WhisperTranscriber.__init__)
     
     yield
     
-    logger.info("STT Whisper Service kapatılıyor")
+    # Shutdown
+    logger.info("🛑 STT Whisper Service shutting down")
 
 app = FastAPI(
-    title="Sentiric STT Whisper Service",
-    description="Faster-Whisper tabanlı uzman STT motoru",
+    title=settings.PROJECT_NAME,
     version=settings.SERVICE_VERSION,
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
-# RPC'ler burada tanımlanacak: WhisperTranscribe
+# Routes
+app.include_router(api_router, prefix="/api/v1")
 
-@app.get("/health", status_code=status.HTTP_200_OK)
+@app.get("/health")
 async def health_check():
-    # Modelin yüklendiğinden emin olmak için daha sonra model kontrolü eklenecek
-    # if WHISPER_MODEL is None:
-    #    return {"status": "degraded", "detail": "Whisper model not loaded"}, status.HTTP_503_SERVICE_UNAVAILABLE
-    
-    return {"status": "ok", "service": "stt-whisper"}
+    """Basit health check - model hazır mı?"""
+    from app.api.v1.endpoints import transcriber
+    return {
+        "status": "healthy" if transcriber.model_loaded else "loading",
+        "service": "stt-whisper",
+        "model_loaded": transcriber.model_loaded,
+        "model_size": settings.WHISPER_MODEL_SIZE
+    }
+
+@app.get("/")
+async def root():
+    return {"message": "Sentiric STT Whisper Service - Saf Transkripsiyon Motoru"}
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error("Global exception handler", error=str(exc), path=request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"}
+    )
