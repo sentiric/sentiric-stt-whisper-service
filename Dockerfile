@@ -1,28 +1,39 @@
-FROM python:3.11-slim-bullseye
+# ==================================
+#      Aşama 1: Builder
+# ==================================
+FROM python:3.11-slim-bullseye AS builder
 
 WORKDIR /app
 
-# Sistem bağımlılıkları
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
+    build-essential cmake ffmpeg libavcodec-dev libavdevice-dev \
+    libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Poetry'yi yükle
-RUN pip install poetry
-
-# Poetry'nin sanal ortam oluşturmasını engelle
+RUN pip install poetry==1.8.2
 RUN poetry config virtualenvs.create false
-
-# Sadece bağımlılık dosyalarını kopyala (Docker katman önbelleği için optimizasyon)
 COPY pyproject.toml ./
-
-# Bağımlılıkları yükle (sadece production, geliştirme bağımlılıkları hariç)
 RUN poetry install --no-interaction --no-ansi --no-root --only main
+
+
+# ==================================
+#      Aşama 2: Final Image
+# ==================================
+FROM python:3.11-slim-bullseye AS final
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
+# Builder aşamasından yüklenmiş Python paketlerini ve komutlarını kopyala
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+# !!! === ÇÖZÜM BU SATIR === !!!
+# uvicorn gibi komutların bulunduğu bin dizinini de kopyala
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Uygulama kodunu kopyala
 COPY ./app ./app
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:15011/health || exit 1
 
