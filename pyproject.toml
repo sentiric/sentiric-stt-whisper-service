@@ -19,7 +19,7 @@ grpcio = "^1.64.1"
 ctranslate2 = ">=3.17"
 faster-whisper = "^1.0" 
 # Protobuf stubs
-sentiric-contracts = { git = "https://github.com/sentiric/sentiric-contracts.git", tag = "v1.9.0" }
+sentiric-contracts-py = { git = "https://github.com/sentiric/sentiric-contracts.git", tag = "v1.9.0" }
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"
