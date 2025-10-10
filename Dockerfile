@@ -3,10 +3,7 @@
 FROM python:3.11-slim-bullseye AS builder
 
 # Gerekli sistem bağımlılıkları
-# build-essential & cmake: CTranslate2 için derleme araçları
-# pkg-config: PyAV gibi C-eklentilerinin kütüphaneleri bulmasını sağlar
-# python3-dev: Python C-eklentilerini derlemek için gerekli başlık dosyaları (KRİTİK VE SON DÜZELTME)
-# ffmpeg ve dev kütüphaneleri: faster-whisper'ın bağımlılığı olan PyAV (av) için
+# C-eklentilerini (PyAV, CTranslate2) kaynak koddan derlemek için gereken her şey
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
@@ -28,11 +25,6 @@ RUN apt-get update && \
 # Poetry kurulumu
 RUN pip install poetry
 
-# Build argümanlarını tanımla
-ARG GIT_COMMIT="unknown"
-ARG BUILD_DATE="unknown"
-ARG SERVICE_VERSION="0.0.0"
-
 WORKDIR /app
 
 # Sadece pyproject.toml kopyalanıyor, lock dosyası build ortamında çözülecek
@@ -40,9 +32,11 @@ COPY pyproject.toml ./
 COPY app ./app
 COPY README.md .
 
-# Bağımlılıkları kur. Sanal ortam oluşturmadan doğrudan sisteme kur.
-# Bu, ikinci aşamaya kopyalamayı kolaylaştırır.
+# --- NİHAİ ÇÖZÜM ---
+# 1. Poetry'nin çözemediği 'av' paketini 'pip' ile zorla kur.
+# 2. Ardından, 'av' zaten kurulu olduğu için sorunsuz çalışacak olan 'poetry install' komutunu çalıştır.
 RUN poetry config virtualenvs.create false && \
+    pip install av && \
     poetry install --no-root --only main --no-interaction --no-ansi
 
 # --- STAGE 2: Production ---
@@ -76,12 +70,10 @@ ARG SERVICE_VERSION
 ENV GIT_COMMIT=${GIT_COMMIT}
 ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_VERSION=${SERVICE_VERSION}
-
-# Whisper model konfigürasyonu
 ENV WHISPER_MODEL_SIZE=large-v3
 ENV WHISPER_DEVICE=cpu
 
 USER appuser
 
-# Başlangıç komutu: STT Motoru HTTP'de 15011'de dinleyecektir (Gateway'in iç portu)
+# Başlangıç komutu
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15011"]
