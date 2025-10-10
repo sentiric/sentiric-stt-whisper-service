@@ -1,3 +1,9 @@
+# ======================================================================================
+#    SENTIRIC PYTHON SERVICE - NIHAI DOCKERFILE v3.0 (BRUTE FORCE BUILD)
+# ======================================================================================
+ARG PYTHON_VERSION=3.11
+ARG BASE_IMAGE_TAG=3.11-slim-bullseye
+
 # STAGE 1: BUILDER
 FROM python:${BASE_IMAGE_TAG} AS builder
 WORKDIR /app
@@ -21,11 +27,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml ./
 
-# ADIM 2: Poetry ile tüm bağımlılıkları kur (av dahil)
-# Poetry'nin kendi çözümleyicisini kullanmasına izin ver
+# ADIM 2: Poetry ile tüm bağımlılıkları kur
 RUN poetry install --without dev --no-root
 
-# STAGE 2: PRODUCTION (bu kısım aynı kalabilir)
+# STAGE 2: PRODUCTION
 FROM python:${BASE_IMAGE_TAG}
 WORKDIR /app
 ARG GIT_COMMIT="unknown"
