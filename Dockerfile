@@ -1,15 +1,9 @@
-# ======================================================================================
-#    SENTIRIC PYTHON SERVICE - NIHAI DOCKERFILE v3.0 (BRUTE FORCE BUILD)
-# ======================================================================================
-ARG PYTHON_VERSION=3.11
-ARG BASE_IMAGE_TAG=${PYTHON_VERSION}-slim-bullseye
-
 # STAGE 1: BUILDER
 FROM python:${BASE_IMAGE_TAG} AS builder
 WORKDIR /app
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 PIP_NO_CACHE_DIR=1 POETRY_NO_INTERACTION=1 POETRY_VIRTUALENVS_IN_PROJECT=true
 
-# ADIM 1: 'av' paketini kaynak koddan derlemek için GEREKEN HER ŞEYİ kur.
+# ADIM 1: Gerekli sistem paketlerini kur
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
@@ -27,14 +21,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml ./
 
-# ADIM 2: NIHAI ÇÖZÜM
-# Önce SADECE problemli 'av' paketini 'pip' ile kur. Ortam hazır olduğu için bu çalışacak.
-# Sonra 'poetry install' çalıştır. Poetry, 'av'yi atlayıp geri kalanları kuracak.
-# NOT: Artık --sync yok, çünkü lock dosyamız yok.
-RUN pip install av && \
-    poetry install --without dev --no-root
+# ADIM 2: Poetry ile tüm bağımlılıkları kur (av dahil)
+# Poetry'nin kendi çözümleyicisini kullanmasına izin ver
+RUN poetry install --without dev --no-root
 
-# STAGE 2: PRODUCTION
+# STAGE 2: PRODUCTION (bu kısım aynı kalabilir)
 FROM python:${BASE_IMAGE_TAG}
 WORKDIR /app
 ARG GIT_COMMIT="unknown"
