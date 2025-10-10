@@ -1,15 +1,13 @@
 # ======================================================================================
-#    SENTIRIC PYTHON SERVICE - NIHAI DOCKERFILE v3.0 (BRUTE FORCE BUILD)
+#    SENTIRIC PYTHON SERVICE - BASİT DOCKERFILE
 # ======================================================================================
-ARG PYTHON_VERSION=3.11
-ARG BASE_IMAGE_TAG=3.11-slim-bullseye
 
 # STAGE 1: BUILDER
-FROM python:${BASE_IMAGE_TAG} AS builder
+FROM python:3.11-slim-bullseye AS builder
 WORKDIR /app
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 PIP_NO_CACHE_DIR=1 POETRY_NO_INTERACTION=1 POETRY_VIRTUALENVS_IN_PROJECT=true
 
-# ADIM 1: Gerekli sistem paketlerini kur
+# Gerekli sistem paketlerini kur
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
@@ -27,11 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml ./
 
-# ADIM 2: Poetry ile tüm bağımlılıkları kur
+# Poetry ile bağımlılıkları kur
 RUN poetry install --without dev --no-root
 
 # STAGE 2: PRODUCTION
-FROM python:${BASE_IMAGE_TAG}
+FROM python:3.11-slim-bullseye
 WORKDIR /app
 ARG GIT_COMMIT="unknown"
 ARG BUILD_DATE="unknown"
