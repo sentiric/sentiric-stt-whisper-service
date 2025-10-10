@@ -9,6 +9,7 @@ python = "^3.11"
 fastapi = "^0.111.0"
 uvicorn = {extras = ["standard"], version = "^0.29.0"}
 pydantic = "^2.7.3"
+pydantic-settings = "^2.3.4" # BU SATIRI EKLEYİN
 python-multipart = "^0.0.9"
 structlog = "^24.1.0"
 faster-whisper = "^1.0.3"
