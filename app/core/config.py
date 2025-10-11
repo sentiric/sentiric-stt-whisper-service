@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     
     # API Ayarları
     API_HOST: str = "0.0.0.0"
-    API_PORT: int = 15011
+    API_PORT: int = 15031
     
     # Performans Ayarları
     MAX_AUDIO_LENGTH: int = 600  # maksimum 10 dakika
