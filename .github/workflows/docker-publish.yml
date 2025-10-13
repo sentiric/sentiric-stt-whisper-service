@@ -1,5 +1,7 @@
+### 📄 File: [ilgili-servis]/.github/workflows/docker-publish.yml (STANDART ve GÜNCELLENMİŞ)
+
 # =================================================================
-#    SENTIRIC PLATFORM - STANDART CI/CD DOCKER YAYINLAMA (v3.3)
+#    SENTIRIC PLATFORM - PYTHON CI/CD DOCKER YAYINLAMA v4.0 (Cache-Optimized)
 # =================================================================
 name: Docker Image CI
 
@@ -32,31 +34,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Extract service name from repository name
-        id: get_service_name
-        run: |
-          REPO_NAME="${{ github.repository }}"
-          echo "SERVICE_NAME=${REPO_NAME#*/}" >> $GITHUB_ENV
-
-      # YENİ: Build argümanlarını hazırla (Python için sürüm pyproject'ten okunur)
-      - name: Prepare Build Arguments
+      - name: Prepare Dynamic Build Arguments
         id: prep
         run: |
           echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
           echo "GIT_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-          # Poetry'den sürümü okuma
           SERVICE_VERSION=$(grep '^version =' pyproject.toml | awk -F '\"' '{print $2}')
           echo "SERVICE_VERSION=$SERVICE_VERSION" >> $GITHUB_ENV
+          # Depo adını küçük harfe çevirerek standartlaştırıyoruz.
+          echo "REPO_NAME_LOWER=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - name: Build and push Docker image
+      - name: Build and push Docker image with Cache
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest, ghcr.io/${{ github.repository }}:${{ env.SERVICE_VERSION }}-${{ env.GIT_COMMIT }}
+          tags: |
+            ghcr.io/${{ env.REPO_NAME_LOWER }}:latest
+            ghcr.io/${{ env.REPO_NAME_LOWER }}:${{ env.SERVICE_VERSION }}-${{ env.GIT_COMMIT }}
           build-args: |
-            SERVICE_NAME=${{ env.SERVICE_NAME }}
-            BUILD_DATE=${{ env.BUILD_DATE }}
-            GIT_COMMIT=${{ env.GIT_COMMIT }}
             SERVICE_VERSION=${{ env.SERVICE_VERSION }}
-          no-cache: true
+            GIT_COMMIT=${{ env.GIT_COMMIT }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          # --- KRİTİK DEĞİŞİKLİK: Akıllı Cache Kullanımı ---
+          # 'no-cache: true' satırını kaldırıp yerine bunu ekliyoruz.
+          cache-from: type=gha,scope=${{ github.ref }}
+          cache-to: type=gha,scope=${{ github.ref }},mode=max
