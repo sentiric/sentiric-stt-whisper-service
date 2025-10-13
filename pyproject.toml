@@ -1,3 +1,5 @@
+### 📄 File: stt-whisper-service/pyproject.toml (DÜZELTİLMİŞ)
+
 [tool.poetry]
 name = "sentiric-stt-whisper-service"
 version = "1.0.0"
@@ -9,7 +11,7 @@ python = "^3.11"
 fastapi = "^0.111.0"
 uvicorn = {extras = ["standard"], version = "^0.29.0"}
 pydantic = "^2.7.3"
-pydantic-settings = "^2.3.4" 
+pydantic-settings = "^2.3.4"
 python-multipart = "^0.0.9"
 structlog = "^24.1.0"
 faster-whisper = "^1.0.3"
@@ -17,11 +19,12 @@ ctranslate2 = "^4.0.0"
 soundfile = "^0.12.1"
 librosa = "^0.10.1"
 numpy = "^1.26.4"
-# !!! === DÜZELTME === !!!
-# faster-whisper'ın gereksinimini karşılamak için av sürümünü yükselt.
 av = "^11.0.0"
 
-# sentiric-contracts-py = { git = "https://github.com/sentiric/sentiric-contracts.git", tag = "v1.9.0" }
+# --- YENİ EKLENEN BÖLÜM ---
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.2"
+# --- BÖLÜM SONU ---
 
 [build-system]
 requires = ["poetry-core"]
