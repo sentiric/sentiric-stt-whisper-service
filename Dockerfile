@@ -1,56 +1,30 @@
-# ==================================
-#      Aşama 1: Builder
-# ==================================
-# !!! === DÜZELTME === !!!
-# Daha yeni FFmpeg içeren bookworm imajını kullan
-FROM python:3.11-slim-bookworm AS builder
+### 📄 File: [ilgili-servis]/Dockerfile (STANDART ŞABLON)
 
+ARG PYTHON_VERSION=3.11
+ARG BASE_IMAGE_TAG=${PYTHON_VERSION}-slim-bullseye
+
+# STAGE 1: BUILDER
+FROM python:${BASE_IMAGE_TAG} AS builder
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends curl build-essential && \
+    pip install --no-cache-dir --upgrade pip poetry && \
+    rm -rf /var/lib/apt/lists/*
+ENV POETRY_VIRTUALENVS_IN_PROJECT=true
+COPY poetry.lock pyproject.toml ./
+RUN poetry install --without dev --no-root
 
-# Derleme için gerekli tüm sistem bağımlılıklarını tek seferde yükle.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    ffmpeg \
-    pkg-config \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavfilter-dev \
-    libavformat-dev \
-    libavutil-dev \
-    libswresample-dev \
-    libswscale-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN pip install poetry==1.8.2
-RUN poetry config virtualenvs.create false
-COPY pyproject.toml ./
-RUN poetry install --no-interaction --no-ansi --no-root --only main
-
-
-# ==================================
-#      Aşama 2: Final Image
-# ==================================
-# !!! === DÜZELTME === !!!
-# Son imaj için de bookworm kullan
-FROM python:3.11-slim-bookworm AS final
-
+# STAGE 2: PRODUCTION
+FROM python:${BASE_IMAGE_TAG}
 WORKDIR /app
+ARG GIT_COMMIT="unknown"
+ARG BUILD_DATE="unknown"
+ARG SERVICE_VERSION="0.0.0"
+ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_VERSION} PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH"
+RUN apt-get update && apt-get install -y --no-install-recommends netcat-openbsd curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN addgroup --system --gid 1001 appgroup && adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
+COPY --from=builder --chown=appuser:appgroup /app/.venv ./.venv
+COPY --chown=appuser:appgroup ./app ./app
+USER appuser
 
-# Yalnızca çalışma zamanı için gereken 'ffmpeg' paketini yükle
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
-
-# Builder aşamasından yüklenmiş Python paketlerini ve komutlarını kopyala
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Uygulama kodunu kopyala
-COPY ./app ./app
-
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:15031/health || exit 1
-
-EXPOSE 15031
-
-CMD ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15031", "--no-access-log"]
+EXPOSE 15030 15031 15032
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15030"]
