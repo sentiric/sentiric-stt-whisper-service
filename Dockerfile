@@ -5,9 +5,22 @@ FROM python:3.11-slim-bullseye AS builder
 
 WORKDIR /app
 
+# --- DÜZELTME BU SATIRDA ---
+# Derleme için gerekli tüm sistem bağımlılıklarını tek seferde yükle.
+# 'pkg-config' paketi, 'av' gibi kütüphanelerin FFmpeg'i bulabilmesi için kritik öneme sahiptir.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake ffmpeg libavcodec-dev libavdevice-dev \
-    libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
+    build-essential \
+    cmake \
+    ffmpeg \
+    pkg-config \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libswscale-dev \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install poetry==1.8.2
@@ -23,12 +36,11 @@ FROM python:3.11-slim-bullseye AS final
 
 WORKDIR /app
 
+# Yalnızca çalışma zamanı için gereken 'ffmpeg' paketini yükle
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
 # Builder aşamasından yüklenmiş Python paketlerini ve komutlarını kopyala
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-# !!! === ÇÖZÜM BU SATIR === !!!
-# uvicorn gibi komutların bulunduğu bin dizinini de kopyala
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Uygulama kodunu kopyala
