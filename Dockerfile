@@ -1,7 +1,8 @@
-### 📄 File: stt-whisper-service/Dockerfile (NİHAİ DÜZELTME)
+### 📄 File: stt-whisper-service/Dockerfile (NİHAİ DÜZELTME v2)
 
 ARG PYTHON_VERSION=3.11
-ARG BASE_IMAGE_TAG=${PYTHON_VERSION}-slim-bullseye
+# --- DEĞİŞİKLİK: bookworm'a geçiyoruz ---
+ARG BASE_IMAGE_TAG=${PYTHON_VERSION}-slim-bookworm
 
 # ==================================
 #      Aşama 1: Builder
@@ -10,36 +11,22 @@ FROM python:${BASE_IMAGE_TAG} AS builder
 
 WORKDIR /app
 
-# --- KAPSAMLI SİSTEM BAĞIMLILIKLARI ---
-# 'av' kütüphanesinin derlenmesi için gereken tüm FFmpeg ve C geliştirme kütüphaneleri
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    ffmpeg \
-    pkg-config \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavfilter-dev \
-    libavformat-dev \
-    libavutil-dev \
-    libswresample-dev \
-    libswscale-dev \
-    curl \
-    git \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-# --- DEĞİŞİKLİK SONU ---
+    build-essential cmake ffmpeg pkg-config libavcodec-dev libavdevice-dev \
+    libavfilter-dev libavformat-dev libavutil-dev libswresample-dev \
+    libswscale-dev curl git \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir --upgrade pip poetry
 ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 COPY poetry.lock pyproject.toml ./
 RUN poetry install --without dev --no-root
 
-
 # ==================================
 #      Aşama 2: Final Image
 # ==================================
-FROM python:${BASE_IMAGE_TAG}
+# --- DEĞİŞİKLİK: bookworm'a geçiyoruz ---
+FROM python:${BASE_IMAGE_TAG} AS final
 
 WORKDIR /app
 
@@ -48,7 +35,6 @@ ARG BUILD_DATE="unknown"
 ARG SERVICE_VERSION="0.0.0"
 ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_VERSION} PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH"
 
-# Yalnızca çalışma zamanı için gereken 'ffmpeg' paketini ve diğerlerini yükle
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg netcat-openbsd curl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system --gid 1001 appgroup && adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
