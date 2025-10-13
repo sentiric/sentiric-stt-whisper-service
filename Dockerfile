@@ -1,13 +1,13 @@
 # ==================================
 #      Aşama 1: Builder
 # ==================================
-FROM python:3.11-slim-bullseye AS builder
+# !!! === DÜZELTME === !!!
+# Daha yeni FFmpeg içeren bookworm imajını kullan
+FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /app
 
-# --- DÜZELTME BU SATIRDA ---
 # Derleme için gerekli tüm sistem bağımlılıklarını tek seferde yükle.
-# 'pkg-config' paketi, 'av' gibi kütüphanelerin FFmpeg'i bulabilmesi için kritik öneme sahiptir.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
@@ -32,7 +32,9 @@ RUN poetry install --no-interaction --no-ansi --no-root --only main
 # ==================================
 #      Aşama 2: Final Image
 # ==================================
-FROM python:3.11-slim-bullseye AS final
+# !!! === DÜZELTME === !!!
+# Son imaj için de bookworm kullan
+FROM python:3.11-slim-bookworm AS final
 
 WORKDIR /app
 
