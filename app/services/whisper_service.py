@@ -1,3 +1,4 @@
+# app/services/whisper_service.py
 import structlog
 import numpy as np
 from typing import Optional
@@ -25,12 +26,15 @@ class WhisperTranscriber:
                 device=settings.WHISPER_DEVICE
             )
             
+            # --- DEĞİŞİKLİK BURADA ---
+            # HF_HOME ortam değişkeninin kullanılabilmesi için bu satırı kaldırıyoruz.
             self.model = WhisperModel(
                 settings.WHISPER_MODEL_SIZE,
                 device=settings.WHISPER_DEVICE,
                 compute_type=settings.WHISPER_COMPUTE_TYPE,
-                download_root="/tmp/whisper_models"  # Model cache için
+                # download_root="/tmp/whisper_models"  # <-- BU SATIR KALDIRILDI
             )
+            # --- DEĞİŞİKLİK SONU ---
             
             self.model_loaded = True
             logger.info("✅ Whisper model successfully loaded")
@@ -57,7 +61,6 @@ class WhisperTranscriber:
             raise RuntimeError("Model not loaded")
         
         try:
-            # Whisper transkripsiyonu
             segments, info = self.model.transcribe(
                 audio_data,
                 language=language,
@@ -72,7 +75,6 @@ class WhisperTranscriber:
                 compression_ratio_threshold=2.4
             )
             
-            # Segmentleri birleştir
             full_text = " ".join(segment.text for segment in segments)
             
             logger.info(
