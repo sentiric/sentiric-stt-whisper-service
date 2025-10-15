@@ -53,4 +53,4 @@ RUN mkdir -p /app/model-cache && \
 USER appuser
 
 EXPOSE 15030 15031 15032
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15030", "--log-config", "null"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15030", "--no-access-log"]
