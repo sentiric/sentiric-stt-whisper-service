@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # --- Whisper Model Ayarları ---
     WHISPER_MODEL_SIZE: str = "medium"
-    WHISPER_DEVICE: str = "cpu"
+    WHISPER_DEVICE: str = "auto" 
     WHISPER_COMPUTE_TYPE: str = "int8"
     TARGET_SAMPLE_RATE: int = 16000
     
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     # --- API Ayarları ---
     API_PORT: int = 15030
     GRPC_PORT: int = 15031
+    METRICS_PORT: int = 15032
 
     model_config = SettingsConfigDict(
         env_file=".env",

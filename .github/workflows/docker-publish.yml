@@ -1,9 +1,7 @@
-### 📄 File: [ilgili-servis]/.github/workflows/docker-publish.yml (STANDART ve GÜNCELLENMİŞ)
-
 # =================================================================
-#    SENTIRIC PLATFORM - PYTHON CI/CD DOCKER YAYINLAMA v4.0 (Cache-Optimized)
+#    SENTIRIC PLATFORM - DOCKER CI v4.2 (DUAL BUILD - NO EXTRAS)
 # =================================================================
-name: Docker Image CI
+name: Docker Image CI (CPU & GPU)
 
 on:
   push:
@@ -17,12 +15,13 @@ jobs:
       contents: read
       packages: write
 
+    strategy:
+      matrix:
+        target: [cpu, gpu]
+
     steps:
-      - name: Check out the repo with submodules
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          fetch-depth: 0 
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -41,22 +40,20 @@ jobs:
           echo "GIT_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
           SERVICE_VERSION=$(grep '^version =' pyproject.toml | awk -F '\"' '{print $2}')
           echo "SERVICE_VERSION=$SERVICE_VERSION" >> $GITHUB_ENV
-          # Depo adını küçük harfe çevirerek standartlaştırıyoruz.
           echo "REPO_NAME_LOWER=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - name: Build and push Docker image with Cache
+      - name: Build and push Docker image (${{ matrix.target }})
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ${{ matrix.target == 'gpu' && './Dockerfile.gpu' || './Dockerfile' }}
           push: true
+          no-cache: true
           tags: |
-            ghcr.io/${{ env.REPO_NAME_LOWER }}:latest
-            ghcr.io/${{ env.REPO_NAME_LOWER }}:${{ env.SERVICE_VERSION }}-${{ env.GIT_COMMIT }}
+            ghcr.io/${{ env.REPO_NAME_LOWER }}:${{ matrix.target == 'cpu' && 'latest' || matrix.target }}
+            ghcr.io/${{ env.REPO_NAME_LOWER }}:${{ matrix.target == 'cpu' && env.SERVICE_VERSION || format('{0}-{1}', env.SERVICE_VERSION, matrix.target) }}
+            ghcr.io/${{ env.REPO_NAME_LOWER }}:${{ matrix.target }}-${{ env.GIT_COMMIT }}
           build-args: |
             SERVICE_VERSION=${{ env.SERVICE_VERSION }}
             GIT_COMMIT=${{ env.GIT_COMMIT }}
             BUILD_DATE=${{ env.BUILD_DATE }}
-          # --- KRİTİK DEĞİŞİKLİK: Akıllı Cache Kullanımı ---
-          # 'no-cache: true' satırını kaldırıp yerine bunu ekliyoruz.
-          cache-from: type=gha,scope=${{ github.ref }}
-          cache-to: type=gha,scope=${{ github.ref }},mode=max
