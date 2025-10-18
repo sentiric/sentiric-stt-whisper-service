@@ -1,46 +1,36 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v4.0 (UNIVERSAL)
+#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v5.0 (FINAL & ROBUST)
 # =================================================================
-# Build argümanları ile temel imajı dinamik olarak seç
+# Build argümanı ile temel imajı dinamik olarak seç
 ARG PYTHON_VERSION=3.11
 ARG BASE_IMAGE=python:${PYTHON_VERSION}-slim-bookworm
 
 # --- Aşama 1: Builder ---
-FROM ${BASE_IMAGE} AS builder
+# Temel olarak her zaman resmi Python imajını kullanıyoruz.
+FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
-# Temel imaja göre doğru paketleri kurmak için koşullu mantık
-RUN \
-    apt-get update && \
-    if [ -f /etc/debian_version ]; then \
-        # Debian (CPU) için kurulum
-        apt-get install -y --no-install-recommends \
-            build-essential cmake pkg-config git curl \
-            ffmpeg libavformat-dev libavcodec-dev libavdevice-dev \
-            libavutil-dev libavfilter-dev libswscale-dev libswresample-dev; \
-    else \
-        # Ubuntu (GPU) için kurulum
-        apt-get install -y --no-install-recommends \
-            build-essential cmake pkg-config git curl \
-            python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python3-pip \
-            ffmpeg libavformat-dev libavcodec-dev libavdevice-dev \
-            libavutil-dev libavfilter-dev libswscale-dev libswresample-dev; \
-        update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1; \
-        update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1; \
-    fi && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Gerekli sistem bağımlılıklarını kur
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git curl \
+    ffmpeg libavformat-dev libavcodec-dev libavdevice-dev \
+    libavutil-dev libavfilter-dev libswscale-dev libswresample-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Poetry'yi kur
 RUN pip install --no-cache-dir --upgrade pip poetry
 ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 
+# Bağımlılıkları kur
 COPY poetry.lock pyproject.toml ./
-# GPU imajı build edilirken --extras cuda kullanılır, diğerinde kullanılmaz
+# POETRY_EXTRAS argümanı CI tarafından sağlanacak (--extras cuda veya boş)
 ARG POETRY_EXTRAS=""
 RUN poetry install --without dev --no-root ${POETRY_EXTRAS}
 
 # --- Aşama 2: Final Image ---
+# Temel imajı yine build argümanından alıyoruz.
 FROM ${BASE_IMAGE} AS final
 WORKDIR /app
 
@@ -55,6 +45,8 @@ ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_
 # Sadece runtime bağımlılıklarını kur
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg netcat-openbsd curl ca-certificates \
+    # GPU imajı için CUDA runtime kütüphanelerini ekliyoruz (CPU imajında bu komut zararsızdır)
+    && if [ -d /usr/local/cuda ]; then apt-get install -y --no-install-recommends cuda-compat-12-1; fi \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system --gid 1001 appgroup && \
