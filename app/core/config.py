@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     WHISPER_LOGPROB_THRESHOLD: float = -1.0
     WHISPER_NO_SPEECH_THRESHOLD: float = 0.6
     
+    # --- API Ayarları ---
+    API_PORT: int = 15030
+    GRPC_PORT: int = 15031
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,

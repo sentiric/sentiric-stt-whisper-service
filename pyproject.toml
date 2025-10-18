@@ -20,6 +20,9 @@ soundfile = "^0.12.1"
 librosa = "^0.10.1"
 numpy = "^1.26.4"
 av = "^11.0.0"
+grpcio = "^1.64.1"
+grpcio-tools = "^1.64.1"
+sentiric-contracts-py = { git = "https://github.com/sentiric/sentiric-contracts.git", tag = "v1.9.0" }
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"
