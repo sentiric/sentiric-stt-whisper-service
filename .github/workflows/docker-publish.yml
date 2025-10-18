@@ -1,5 +1,5 @@
 # =================================================================
-#    SENTIRIC PLATFORM - DOCKER CI v4.3 (DUAL BUILD - SIMPLIFIED)
+#    SENTIRIC PLATFORM - DOCKER CI v5.0 (UNIVERSAL DOCKERFILE)
 # =================================================================
 name: Docker Image CI (CPU & GPU)
 
@@ -17,7 +17,13 @@ jobs:
 
     strategy:
       matrix:
-        target: [cpu, gpu]
+        include:
+          - target: cpu
+            base_image: python:3.11-slim-bookworm
+            poetry_extras: ""
+          - target: gpu
+            base_image: nvidia/cuda:12.1.1-devel-ubuntu22.04
+            poetry_extras: "--extras cuda"
 
     steps:
       - name: Checkout repository
@@ -46,7 +52,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ matrix.target == 'gpu' && './Dockerfile.gpu' || './Dockerfile' }}
+          file: ./Dockerfile
           push: true
           no-cache: true
           tags: |
@@ -54,6 +60,8 @@ jobs:
             ghcr.io/${{ env.REPO_NAME_LOWER }}:${{ matrix.target == 'cpu' && env.SERVICE_VERSION || format('{0}-{1}', env.SERVICE_VERSION, matrix.target) }}
             ghcr.io/${{ env.REPO_NAME_LOWER }}:${{ matrix.target }}-${{ env.GIT_COMMIT }}
           build-args: |
+            BASE_IMAGE=${{ matrix.base_image }}
+            POETRY_EXTRAS=${{ matrix.poetry_extras }}
             SERVICE_VERSION=${{ env.SERVICE_VERSION }}
             GIT_COMMIT=${{ env.GIT_COMMIT }}
             BUILD_DATE=${{ env.BUILD_DATE }}
