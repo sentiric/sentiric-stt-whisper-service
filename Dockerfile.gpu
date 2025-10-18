@@ -1,5 +1,5 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v3.2 (GPU-ENABLED)
+#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v3.3 (GPU - UBUNTU FIX)
 # =================================================================
 ARG CUDA_VERSION=12.1.1
 ARG PYTHON_VERSION=3.11
@@ -7,25 +7,30 @@ ARG UBUNTU_VERSION=22.04
 
 # --- Aşama 1: Builder ---
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS builder
+
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
+# Gerekli sistem bağımlılıklarını kur (Ubuntu 22.04 uyumlu)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake ffmpeg pkg-config git curl \
-    python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python3-pip \
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-venv \
+    python3-pip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Python ve pip için sembolik linkler oluştur
 RUN ln -s /usr/bin/python${PYTHON_VERSION} /usr/bin/python && \
     ln -s /usr/bin/python${PYTHON_VERSION} /usr/bin/python3
 
+# Poetry'yi kur
 RUN pip install --no-cache-dir --upgrade pip poetry
 ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 
+# Bağımlılıkları kur
 COPY poetry.lock pyproject.toml ./
-# Önce normal bağımlılıkları kur
-RUN poetry install --without dev --no-root --only-main
-# DEĞİŞİKLİK BURADA: ctranslate2'nin CUDA versiyonunu üzerine yazarak kur
-RUN poetry run pip install --no-cache-dir "ctranslate2[cuda]"
+# GPU (cuda) extras'ını da dahil ederek bağımlılıkları kur
+RUN poetry install --without dev --no-root --only-main --extras cuda
 
 # --- Aşama 2: Final Image ---
 FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu${UBUNTU_VERSION} AS final
@@ -39,16 +44,21 @@ ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_
     HF_HOME="/app/model-cache" \
     LD_LIBRARY_PATH="/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}"
 
+# Runtime için gerekli sistem bağımlılıklarını kur (Ubuntu 22.04 uyumlu)
+# DEĞİŞİKLİK BURADA: 'python' yerine 'python3.11' kullanılıyor.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg netcat-openbsd curl ca-certificates python${PYTHON_VERSION} \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Kullanıcı ve grup oluştur
 RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
 
+# Builder'dan sanal ortamı ve uygulama kodunu kopyala
 COPY --from=builder --chown=appuser:appgroup /app/.venv ./.venv
 COPY --chown=appuser:appgroup ./app ./app
 
+# Model cache dizinini oluştur ve izinlerini ayarla
 RUN mkdir -p /app/model-cache && \
     chown -R appuser:appgroup /app/model-cache
 
