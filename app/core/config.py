@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 class Settings(BaseSettings):
@@ -13,14 +13,15 @@ class Settings(BaseSettings):
     
     # API Ayarları
     API_HOST: str = "0.0.0.0"
-    API_PORT: int = 15031
+    API_PORT: int = 15030
     
     # Performans Ayarları
-    MAX_AUDIO_LENGTH: int = 600  # maksimum 10 dakika
     TARGET_SAMPLE_RATE: int = 16000
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra='ignore'
+    )
 
 settings = Settings()
