@@ -1,83 +1,47 @@
-import structlog
+import io
+import librosa
 import numpy as np
+import structlog
+from fastapi import APIRouter, File, UploadFile, HTTPException, Form, Request, status
 from typing import Optional
-from faster_whisper import WhisperModel
+
 from app.core.config import settings
 
+router = APIRouter()
 logger = structlog.get_logger(__name__)
 
-class WhisperTranscriber:
-    """
-    Saf Whisper transkripsiyon motoru. Tek sorumluluğu: Ses -> Metin.
-    Modeli başlangıçta yükler ve gelen ses verilerini metne çevirir.
-    """
-    
-    def __init__(self):
-        self.model: Optional[WhisperModel] = None
-        self.model_loaded = False
-        self._load_model()
-    
-    def _load_model(self):
-        """
-        Whisper modelini `HF_HOME` ortam değişkenini kullanarak yükler.
-        Bu, modelin kalıcı bir volume'de saklanmasını sağlar.
-        """
-        if self.model_loaded:
-            return
-        try:
-            logger.info(
-                "Loading Whisper model...",
-                model_size=settings.WHISPER_MODEL_SIZE,
-                device=settings.WHISPER_DEVICE,
-                compute_type=settings.WHISPER_COMPUTE_TYPE
-            )
-            self.model = WhisperModel(
-                settings.WHISPER_MODEL_SIZE,
-                device=settings.WHISPER_DEVICE,
-                compute_type=settings.WHISPER_COMPUTE_TYPE,
-            )
-            self.model_loaded = True
-            logger.info("✅ Whisper model successfully loaded.")
-            
-        except Exception as e:
-            logger.error("❌ Failed to load Whisper model", error=str(e), exc_info=True)
-            self.model_loaded = False
-            raise
-    
-    def transcribe(self, audio_data: np.ndarray, language: Optional[str] = None) -> dict:
-        """
-        Saf transkripsiyon işlemi.
-        
-        Args:
-            audio_data: 16kHz, mono, float32 PCM ses verisi (numpy array).
-            language: "tr", "en" gibi dil kodu. None ise otomatik algılar.
-        """
-        if not self.model:
-            raise RuntimeError("Model is not loaded or initialization failed.")
-        
-        try:
-            segments, info = self.model.transcribe(
-                audio_data,
-                language=language,
-                beam_size=5,
-            )
-            
-            full_text = " ".join(segment.text for segment in segments)
-            
-            logger.info(
-                "Transcription completed",
-                detected_language=info.language,
-                language_probability=round(info.language_probability, 2),
-                duration_seconds=round(info.duration, 2)
-            )
-            
-            return {
-                "text": full_text.strip(),
-                "language": info.language,
-                "language_probability": info.language_probability,
-                "duration": info.duration
-            }
-            
-        except Exception as e:
-            logger.error("Transcription failed during model execution", error=str(e), exc_info=True)
-            raise
+@router.post("/transcribe", summary="Bir ses dosyasını metne çevirir")
+async def create_transcription(
+    request: Request,
+    file: UploadFile = File(..., description="Metne çevrilecek ses dosyası."),
+    language: Optional[str] = Form(None, description="Sesin dili (örn: 'tr', 'en'). Otomatik algılar.")
+):
+    transcriber = request.app.state.transcriber
+    if not transcriber or not transcriber.model_loaded:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, 
+            detail="Model henüz hazır değil. Lütfen bir süre sonra tekrar deneyin."
+        )
+
+    try:
+        audio_bytes = await file.read()
+        audio_array, _ = librosa.load(
+            io.BytesIO(audio_bytes),
+            sr=settings.TARGET_SAMPLE_RATE,
+            mono=True
+        )
+        audio_array = audio_array.astype(np.float32)
+
+        logger.info(
+            "Transkripsiyon isteği alındı",
+            filename=file.filename,
+            content_type=file.content_type,
+            language_hint=language
+        )
+
+        result = transcriber.transcribe(audio_data=audio_array, language=language)
+        return result
+
+    except Exception as e:
+        logger.error("Transkripsiyon işlemi sırasında hata", error=str(e), exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

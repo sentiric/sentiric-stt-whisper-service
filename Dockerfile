@@ -39,7 +39,6 @@ RUN addgroup --system --gid 1001 appgroup && adduser --system --no-create-home -
 COPY --from=builder --chown=appuser:appgroup /app/.venv ./.venv
 COPY --chown=appuser:appgroup ./app ./app
 
-# Model cache dizinini oluştur ve sahipliğini appuser'a ver.
 RUN mkdir -p /app/model-cache && \
     chown -R appuser:appgroup /app/model-cache
 

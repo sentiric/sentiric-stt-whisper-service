@@ -5,21 +5,28 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import setup_logging
-from app.api.v1.endpoints import router as api_router, transcriber
+from app.api.v1.endpoints import router as api_router
+from app.services.whisper_service import WhisperTranscriber
 
 logger = structlog.get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Başlangıç
     setup_logging()
-    logger.info(
-        "🚀 STT Whisper Service başlatılıyor...",
-        version=settings.SERVICE_VERSION,
-        model=settings.WHISPER_MODEL_SIZE
-    )
-    # Model yüklemesi `endpoints` modülü import edilirken tetiklendi.
+    logger.info("🚀 STT Whisper Service başlatılıyor...")
+    
+    transcriber_instance = WhisperTranscriber()
+    transcriber_instance.load_model()
+    
+    app.state.transcriber = transcriber_instance
+    app.state.model_ready = transcriber_instance.model_loaded
+    
     yield
+    
+    # Kapanış
     logger.info("🛑 STT Whisper Service kapatılıyor.")
+    app.state.transcriber = None
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -30,20 +37,21 @@ app = FastAPI(
 app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/health", tags=["Health"])
-async def health_check():
-    """Servisin ve AI modelinin durumunu kontrol eder."""
-    is_loaded = transcriber.model_loaded
-    status_code = 200 if is_loaded else 503
+async def health_check(request: Request):
+    is_ready = getattr(request.app.state, 'model_ready', False)
+    status_code = 200 if is_ready else 503
     
-    response_data = {
-        "status": "healthy" if is_loaded else "model_loading",
-        "service": "stt-whisper-service",
-        "model_loaded": is_loaded,
-        "model_size": settings.WHISPER_MODEL_SIZE
-    }
-    
-    return JSONResponse(status_code=status_code, content=response_data)
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "healthy" if is_ready else "model_loading_failed",
+            "service": settings.PROJECT_NAME,
+            "model_ready": is_ready,
+            "model_size": settings.WHISPER_MODEL_SIZE,
+            "version": settings.SERVICE_VERSION
+        }
+    )
 
 @app.get("/")
 async def root():
-    return {"message": "Sentiric STT Whisper Service - Uzman Transkripsiyon Motoru"}
+    return {"message": f"Welcome to {settings.PROJECT_NAME} v{settings.SERVICE_VERSION}"}

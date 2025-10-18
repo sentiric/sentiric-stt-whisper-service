@@ -7,26 +7,16 @@ from app.core.config import settings
 logger = structlog.get_logger(__name__)
 
 class WhisperTranscriber:
-    """
-    Saf Whisper transkripsiyon motoru. Tek sorumluluğu: Ses -> Metin.
-    Modeli başlangıçta yükler ve gelen ses verilerini metne çevirir.
-    """
-    
     def __init__(self):
         self.model: Optional[WhisperModel] = None
         self.model_loaded = False
-        self._load_model()
-    
-    def _load_model(self):
-        """
-        Whisper modelini `HF_HOME` ortam değişkenini kullanarak yükler.
-        Bu, modelin kalıcı bir volume'de saklanmasını sağlar.
-        """
+
+    def load_model(self):
         if self.model_loaded:
             return
         try:
             logger.info(
-                "Loading Whisper model...",
+                "Whisper modeli yükleniyor...",
                 model_size=settings.WHISPER_MODEL_SIZE,
                 device=settings.WHISPER_DEVICE,
                 compute_type=settings.WHISPER_COMPUTE_TYPE
@@ -37,37 +27,31 @@ class WhisperTranscriber:
                 compute_type=settings.WHISPER_COMPUTE_TYPE,
             )
             self.model_loaded = True
-            logger.info("✅ Whisper model successfully loaded.")
-            
+            logger.info("✅ Whisper modeli başarıyla yüklendi.")
         except Exception as e:
-            logger.error("❌ Failed to load Whisper model", error=str(e), exc_info=True)
             self.model_loaded = False
+            logger.error("❌ Whisper modeli yüklenemedi", error=str(e), exc_info=True)
             raise
-    
+
     def transcribe(self, audio_data: np.ndarray, language: Optional[str] = None) -> dict:
-        """
-        Saf transkripsiyon işlemi.
-        
-        Args:
-            audio_data: 16kHz, mono, float32 PCM ses verisi (numpy array).
-            language: "tr", "en" gibi dil kodu. None ise otomatik algılar.
-        """
         if not self.model:
-            raise RuntimeError("Model is not loaded or initialization failed.")
+            raise RuntimeError("Model yüklenmemiş veya başlatma başarısız olmuş.")
         
         try:
             segments, info = self.model.transcribe(
                 audio_data,
                 language=language,
                 beam_size=5,
+                log_prob_threshold=settings.WHISPER_LOGPROB_THRESHOLD,
+                no_speech_threshold=settings.WHISPER_NO_SPEECH_THRESHOLD
             )
             
             full_text = " ".join(segment.text for segment in segments)
             
             logger.info(
-                "Transcription completed",
+                "Transkripsiyon tamamlandı",
                 detected_language=info.language,
-                language_probability=round(info.language_probability, 2),
+                lang_probability=round(info.language_probability, 2),
                 duration_seconds=round(info.duration, 2)
             )
             
@@ -77,7 +61,6 @@ class WhisperTranscriber:
                 "language_probability": info.language_probability,
                 "duration": info.duration
             }
-            
         except Exception as e:
-            logger.error("Transcription failed during model execution", error=str(e), exc_info=True)
+            logger.error("Transkripsiyon sırasında model hatası", error=str(e), exc_info=True)
             raise
