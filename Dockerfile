@@ -1,5 +1,5 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v6.0 (CPU-ONLY - FINAL)
+#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v6.1 (CPU - FINAL FIX)
 # =================================================================
 ARG PYTHON_VERSION=3.11
 ARG BASE_IMAGE_TAG=${PYTHON_VERSION}-slim-bookworm
@@ -9,8 +9,9 @@ FROM python:${BASE_IMAGE_TAG} AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
+# Debian için doğru venv paket adını kullanıyoruz: python3-venv
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake pkg-config git curl \
+    build-essential cmake pkg-config git curl python3-venv \
     ffmpeg libavformat-dev libavcodec-dev libavdevice-dev \
     libavutil-dev libavfilter-dev libswscale-dev libswresample-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -40,7 +41,7 @@ RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
 
 COPY --from=builder --chown=appuser:appgroup /app/.venv ./.venv
-COPY --chown=appuser:appgroup ./app ./app
+COPY --from=builder --chown=appuser:appgroup /app/app ./app
 
 RUN mkdir -p /app/model-cache && \
     chown -R appuser:appgroup /app/model-cache
