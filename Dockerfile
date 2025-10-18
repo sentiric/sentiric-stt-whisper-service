@@ -1,5 +1,5 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v3.5 (CPU-ONLY - FINAL FIX)
+#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v3.6 (CPU - FINAL FIX)
 # =================================================================
 ARG PYTHON_VERSION=3.11
 ARG BASE_IMAGE_TAG=${PYTHON_VERSION}-slim-bookworm
@@ -9,15 +9,17 @@ FROM python:${BASE_IMAGE_TAG} AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
+# DEĞİŞİKLİK BURADA: ffmpeg geliştirme kütüphaneleri eklendi
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake ffmpeg pkg-config git curl \
+    build-essential cmake pkg-config git curl \
+    ffmpeg libavformat-dev libavcodec-dev libavdevice-dev \
+    libavutil-dev libavfilter-dev libswscale-dev libswresample-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir --upgrade pip poetry
 ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 
 COPY poetry.lock pyproject.toml ./
-# DEĞİŞİKLİK BURADA: En basit ve evrensel install komutu kullanılıyor
 RUN poetry install --without dev --no-root
 
 # --- Aşama 2: Final Image ---
@@ -31,6 +33,7 @@ ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_
     PATH="/app/.venv/bin:$PATH" \
     HF_HOME="/app/model-cache"
 
+# Runtime için sadece ffmpeg yeterli, -dev paketleri değil.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg netcat-openbsd curl ca-certificates libgomp1 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -39,7 +42,7 @@ RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
 
 COPY --from=builder --chown=appuser:appgroup /app/.venv ./.venv
-COPY --chown=appuser:appgroup ./app ./app
+COPY --from=builder --chown=appuser:appgroup /app/app ./app
 
 RUN mkdir -p /app/model-cache && \
     chown -R appuser:appgroup /app/model-cache
