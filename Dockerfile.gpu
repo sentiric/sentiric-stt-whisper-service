@@ -1,5 +1,5 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v3.3 (GPU - UBUNTU FIX)
+#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v3.3 (GPU - UBUNTU FIX v2)
 # =================================================================
 ARG CUDA_VERSION=12.1.1
 ARG PYTHON_VERSION=3.11
@@ -19,9 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Python ve pip için sembolik linkler oluştur
-RUN ln -s /usr/bin/python${PYTHON_VERSION} /usr/bin/python && \
-    ln -s /usr/bin/python${PYTHON_VERSION} /usr/bin/python3
+# DEĞİŞİKLİK BURADA: 'python' ve 'pip' komutlarını sisteme tanıtıyoruz
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1
+RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
 # Poetry'yi kur
 RUN pip install --no-cache-dir --upgrade pip poetry
@@ -29,7 +29,6 @@ ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 
 # Bağımlılıkları kur
 COPY poetry.lock pyproject.toml ./
-# GPU (cuda) extras'ını da dahil ederek bağımlılıkları kur
 RUN poetry install --without dev --no-root --only-main --extras cuda
 
 # --- Aşama 2: Final Image ---
@@ -56,7 +55,7 @@ RUN addgroup --system --gid 1001 appgroup && \
 
 # Builder'dan sanal ortamı ve uygulama kodunu kopyala
 COPY --from=builder --chown=appuser:appgroup /app/.venv ./.venv
-COPY --chown=appuser:appgroup ./app ./app
+COPY --from=builder --chown=appuser:appgroup /app/app ./app
 
 # Model cache dizinini oluştur ve izinlerini ayarla
 RUN mkdir -p /app/model-cache && \
