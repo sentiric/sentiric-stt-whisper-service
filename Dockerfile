@@ -1,5 +1,5 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v3.2 (CPU-ONLY)
+#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v3.5 (CPU-ONLY - FINAL FIX)
 # =================================================================
 ARG PYTHON_VERSION=3.11
 ARG BASE_IMAGE_TAG=${PYTHON_VERSION}-slim-bookworm
@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir --upgrade pip poetry
 ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 
 COPY poetry.lock pyproject.toml ./
-RUN poetry install --without dev --no-root --only-main
+# DEĞİŞİKLİK BURADA: En basit ve evrensel install komutu kullanılıyor
+RUN poetry install --without dev --no-root
 
 # --- Aşama 2: Final Image ---
 FROM python:${BASE_IMAGE_TAG} AS final

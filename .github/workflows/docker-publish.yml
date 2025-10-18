@@ -1,5 +1,5 @@
 # =================================================================
-#    SENTIRIC PLATFORM - DOCKER CI v4.2 (DUAL BUILD - NO EXTRAS)
+#    SENTIRIC PLATFORM - DOCKER CI v4.3 (DUAL BUILD - SIMPLIFIED)
 # =================================================================
 name: Docker Image CI (CPU & GPU)
 
