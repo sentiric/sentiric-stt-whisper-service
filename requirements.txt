@@ -24,7 +24,8 @@ grpcio==1.64.1
 grpcio-tools==1.64.1
 
 # Monitoring & utilities
-prometheus-fastapi-instrumentator==6.1.0
+# HATA DÜZELTME: 'Info' sınıfı için kütüphane sürümü yükseltildi.
+prometheus-fastapi-instrumentator==7.0.0
 aiofiles==23.2.1
 psutil==5.9.8
 
