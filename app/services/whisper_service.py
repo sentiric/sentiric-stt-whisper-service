@@ -10,6 +10,7 @@ class WhisperTranscriber:
     def __init__(self):
         self.model: Optional[WhisperModel] = None
         self.model_loaded = False
+        self.device = settings.get_device() # Dinamik cihaz seçimi
 
     def load_model(self):
         if self.model_loaded:
@@ -18,24 +19,25 @@ class WhisperTranscriber:
             logger.info(
                 "Whisper modeli yükleniyor...",
                 model_size=settings.WHISPER_MODEL_SIZE,
-                device=settings.WHISPER_DEVICE,
+                target_device=self.device,
                 compute_type=settings.WHISPER_COMPUTE_TYPE
             )
             self.model = WhisperModel(
                 settings.WHISPER_MODEL_SIZE,
-                device=settings.WHISPER_DEVICE,
+                device=self.device,
                 compute_type=settings.WHISPER_COMPUTE_TYPE,
             )
             self.model_loaded = True
-            logger.info("✅ Whisper modeli başarıyla yüklendi.")
+            logger.info("✅ Whisper modeli başarıyla yüklendi.", on_device=self.device)
         except Exception as e:
             self.model_loaded = False
             logger.error("❌ Whisper modeli yüklenemedi", error=str(e), exc_info=True)
             raise
 
+    # transcribe metodu aynı kalabilir, değişiklik gerekmiyor.
     def transcribe(self, audio_data: np.ndarray, language: Optional[str] = None) -> dict:
         if not self.model:
-            raise RuntimeError("Model yüklenmemiş veya başlatma başarısız olmuş.")
+            raise RuntimeError("Model is not loaded or initialization failed.")
         
         try:
             segments, info = self.model.transcribe(
