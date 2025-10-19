@@ -23,7 +23,7 @@ av = "^11.0.0"
 grpcio = "^1.64.1"
 grpcio-tools = "^1.64.1"
 torch = "^2.3.0"  # Eklendi - GPU kontrolü için gerekli
-sentiric-contracts-py = { git = "https://github.com/sentiric/sentiric-contracts.git", tag = "v1.9.0" }
+sentiric-contracts-py = { git = "https://github.com/sentiric/sentiric-contracts.git", tag = "v1.9.1" }
 prometheus-fastapi-instrumentator = "^6.1.0"
 
 # Yeni bağımlılıklar
