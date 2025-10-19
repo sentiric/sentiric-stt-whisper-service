@@ -19,8 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 # Pip'i güvenli şekilde yükle
-RUN python -m ensurepip --upgrade
-RUN python -m pip install --no-cache-dir --upgrade pip
+# HATA DÜZELTME: 'python' komutu nvidia/cuda imajında bulunmuyor. 'python3' kullanıldı.
+RUN python3 -m ensurepip --upgrade
+RUN python3 -m pip install --no-cache-dir --upgrade pip
 
 # Önce temel bağımlılıkları kur
 COPY requirements.txt .
