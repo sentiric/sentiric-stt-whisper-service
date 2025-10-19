@@ -1,33 +1,29 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v8.2 (FIXED)
+#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v8.4 (SIMPLIFIED)
 # =================================================================
-# Build argümanları ile temel imajı dinamik olarak seç
 ARG PYTHON_VERSION=3.11
 ARG BASE_IMAGE=python:${PYTHON_VERSION}-slim-bookworm
 
-# --- Aşama 1: Builder (Her zaman stabil Debian tabanlı) ---
-FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
+FROM ${BASE_IMAGE} AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
-# Gerekli sistem bağımlılıklarını kur
+# Temel bağımlılıklar
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake git curl python3-venv \
-    ffmpeg libavformat-dev libavcodec-dev libavdevice-dev \
-    libavutil-dev libavfilter-dev libswscale-dev libswresample-dev \
+    build-essential cmake git curl \
+    ffmpeg libavcodec-dev libavformat-dev libswscale-dev libavdevice-dev \
+    libsndfile1 portaudio19-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Poetry 1.8.2'yi kur (export komutu desteklenen sürüm)
-RUN pip install --no-cache-dir --upgrade pip poetry==1.8.2
-ENV POETRY_VIRTUALENVS_IN_PROJECT=true
+# PyTorch'u öncelikli kur
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir torch==2.3.0 --index-url https://download.pytorch.org/whl/cpu
 
-# Bağımlılıkları kur
-COPY poetry.lock pyproject.toml ./
-RUN poetry export -f requirements.txt --output requirements.txt --without-hashes
+# Diğer bağımlılıklar
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# --- Aşama 2: Final Image (Dinamik Temel) ---
 FROM ${BASE_IMAGE} AS final
 WORKDIR /app
 
@@ -36,28 +32,25 @@ ARG BUILD_DATE="unknown"
 ARG SERVICE_VERSION="0.0.0"
 ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_VERSION} PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
-    HF_HOME="/app/model-cache" \
-    LD_LIBRARY_PATH="/usr/local/nvidia/lib64:${LD_LIBRARY_PATH:-}"
+    HF_HOME="/app/model-cache"
 
-# CUDA runtime kütüphanelerini ekle (GPU imajı için)
-RUN if [ "$(uname -m)" = "x86_64" ] && [ -d "/usr/local/cuda" ]; then \
+# Runtime bağımlılıklar
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg libsndfile1 curl ca-certificates \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# CUDA için (GPU image)
+RUN if command -v nvidia-smi > /dev/null 2>&1; then \
         apt-get update && apt-get install -y --no-install-recommends \
-        cuda-cudart-12-1 \
-        cuda-nvtx-12-1 \
-        cuda-nvml-dev-12-1 \
+        cuda-cudart-12-1 cuda-nvtx-12-1 \
         && apt-get clean && rm -rf /var/lib/apt/lists/*; \
     fi
-    
-# Sadece runtime bağımlılıklarını kur
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg netcat-openbsd curl ca-certificates libsndfile1 \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
 
-# Builder'dan gelen Python bağımlılıklarını ve uygulama kodunu kopyala
-COPY --from=builder /app/.venv ./.venv
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --chown=appuser:appgroup ./app ./app
 
 RUN mkdir -p /app/model-cache && \

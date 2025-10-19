@@ -1,0 +1,33 @@
+# Core dependencies
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+pydantic==2.7.3
+pydantic-settings==2.3.4
+python-multipart==0.0.9
+structlog==24.1.0
+
+# AI/ML dependencies
+faster-whisper==1.0.3
+ctranslate2==4.0.0
+torch==2.3.0
+
+# Audio processing
+soundfile==0.12.1
+librosa==0.10.1
+numpy==1.26.4
+
+# AV yerine alternatif kütüphaneler - PyAV sorun yaratıyor
+opencv-python==4.10.0.84  # Görsel işleme için alternatif
+pillow==10.4.0           # Görsel işleme
+
+# Network & gRPC
+grpcio==1.64.1
+grpcio-tools==1.64.1
+
+# Monitoring & utilities
+prometheus-fastapi-instrumentator==6.1.0
+aiofiles==23.2.1
+psutil==5.9.8
+
+# Contracts
+sentiric-contracts-py @ git+https://github.com/sentiric/sentiric-contracts.git@v1.9.1
