@@ -22,8 +22,13 @@ numpy = "^1.26.4"
 av = "^11.0.0"
 grpcio = "^1.64.1"
 grpcio-tools = "^1.64.1"
+torch = "^2.3.0"  # Eklendi - GPU kontrolü için gerekli
 sentiric-contracts-py = { git = "https://github.com/sentiric/sentiric-contracts.git", tag = "v1.9.0" }
 prometheus-fastapi-instrumentator = "^6.1.0"
+
+# Yeni bağımlılıklar
+aiofiles = "^23.2.1"  # Async dosya işlemleri için
+psutil = "^5.9.8"     # Sistem kaynakları izleme
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"

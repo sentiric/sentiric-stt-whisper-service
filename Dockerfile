@@ -39,6 +39,15 @@ ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_
     HF_HOME="/app/model-cache" \
     LD_LIBRARY_PATH="/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}"
 
+# CUDA runtime kütüphanelerini ekle (GPU imajı için)
+RUN if [ "$(uname -m)" = "x86_64" ] && [ -d "/usr/local/cuda" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+        cuda-cudart-12-1 \
+        cuda-nvtx-12-1 \
+        cuda-nvml-dev-12-1 \
+        && apt-get clean && rm -rf /var/lib/apt/lists/*; \
+    fi
+    
 # Sadece runtime bağımlılıklarını kur
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg netcat-openbsd curl ca-certificates libsndfile1 \

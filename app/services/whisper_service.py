@@ -18,14 +18,14 @@ class WhisperTranscriber:
         try:
             logger.info(
                 "Whisper modeli yükleniyor...",
-                model_size=settings.WHISPER_MODEL_SIZE,
+                model_size=settings.STT_WHISPER_SERVICE_MODEL_SIZE,
                 target_device=self.device,
-                compute_type=settings.WHISPER_COMPUTE_TYPE
+                compute_type=settings.STT_WHISPER_SERVICE_COMPUTE_TYPE
             )
             self.model = WhisperModel(
-                settings.WHISPER_MODEL_SIZE,
+                settings.STT_WHISPER_SERVICE_MODEL_SIZE,
                 device=self.device,
-                compute_type=settings.WHISPER_COMPUTE_TYPE,
+                compute_type=settings.STT_WHISPER_SERVICE_COMPUTE_TYPE,
             )
             self.model_loaded = True
             logger.info("✅ Whisper modeli başarıyla yüklendi.", on_device=self.device)
@@ -34,21 +34,24 @@ class WhisperTranscriber:
             logger.error("❌ Whisper modeli yüklenemedi", error=str(e), exc_info=True)
             raise
 
-    # transcribe metodu aynı kalabilir, değişiklik gerekmiyor.
+    # Geliştirilmiş transcribe metodu
     def transcribe(self, audio_data: np.ndarray, language: Optional[str] = None) -> dict:
         if not self.model:
             raise RuntimeError("Model is not loaded or initialization failed.")
         
+        segments = None
         try:
             segments, info = self.model.transcribe(
                 audio_data,
                 language=language,
                 beam_size=5,
-                log_prob_threshold=settings.WHISPER_LOGPROB_THRESHOLD,
-                no_speech_threshold=settings.WHISPER_NO_SPEECH_THRESHOLD
+                log_prob_threshold=settings.STT_WHISPER_SERVICE_LOGPROB_THRESHOLD,
+                no_speech_thRESHOLD=settings.STT_WHISPER_SERVICE_NO_SPEECH_THRESHOLD
             )
             
-            full_text = " ".join(segment.text for segment in segments)
+            # Segmentleri listeye çevir ve iterator'ü temizle
+            segments_list = list(segments)
+            full_text = " ".join(segment.text for segment in segments_list)
             
             logger.info(
                 "Transkripsiyon tamamlandı",
@@ -66,3 +69,7 @@ class WhisperTranscriber:
         except Exception as e:
             logger.error("Transkripsiyon sırasında model hatası", error=str(e), exc_info=True)
             raise
+        finally:
+            # Memory temizleme
+            if segments:
+                del segments

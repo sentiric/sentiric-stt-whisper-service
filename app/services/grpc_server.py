@@ -33,7 +33,7 @@ class SttWhisperServiceServicer(whisper_pb2_grpc.SttWhisperServiceServicer):
             # Gelen byte'ları librosa ile standart formata çevir
             audio_array, _ = librosa.load(
                 io.BytesIO(request.audio_data),
-                sr=settings.TARGET_SAMPLE_RATE,
+                sr=settings.STT_WHISPER_SERVICE_TARGET_SAMPLE_RATE,
                 mono=True
             )
             audio_array = audio_array.astype(np.float32)
@@ -56,7 +56,7 @@ async def serve(transcriber: WhisperTranscriber) -> grpc.aio.Server:
     whisper_pb2_grpc.add_SttWhisperServiceServicer_to_server(
         SttWhisperServiceServicer(transcriber), server
     )
-    listen_addr = f"[::]:{settings.GRPC_PORT}"
+    listen_addr = f"[::]:{settings.STT_WHISPER_SERVICE_GRPC_PORT}"
     server.add_insecure_port(listen_addr)
     await server.start()
     logger.info(f"gRPC sunucusu başlatıldı ve dinleniyor: {listen_addr}")
