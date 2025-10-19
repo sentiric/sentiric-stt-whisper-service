@@ -1,5 +1,5 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v8.1 (FINAL & UNIFIED)
+#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v8.2 (FIXED)
 # =================================================================
 # Build argümanları ile temel imajı dinamik olarak seç
 ARG PYTHON_VERSION=3.11
@@ -18,8 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavutil-dev libavfilter-dev libswscale-dev libswresample-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Poetry'yi kur
-RUN pip install --no-cache-dir --upgrade pip poetry
+# Poetry 1.8.2'yi kur (export komutu desteklenen sürüm)
+RUN pip install --no-cache-dir --upgrade pip poetry==1.8.2
 ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 
 # Bağımlılıkları kur
@@ -37,7 +37,7 @@ ARG SERVICE_VERSION="0.0.0"
 ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_VERSION} PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
     HF_HOME="/app/model-cache" \
-    LD_LIBRARY_PATH="/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}"
+    LD_LIBRARY_PATH="/usr/local/nvidia/lib64:${LD_LIBRARY_PATH:-}"
 
 # CUDA runtime kütüphanelerini ekle (GPU imajı için)
 RUN if [ "$(uname -m)" = "x86_64" ] && [ -d "/usr/local/cuda" ]; then \
