@@ -1,12 +1,14 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v8.5 (STABLE)
+#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v8.6 (STABLE)
 # =================================================================
-# Build argümanları ile temel imajı dinamik olarak seç
+# Build argümanları ile temel imajı dinamik olarak seç (sadece final aşaması için)
 ARG PYTHON_VERSION=3.11
 ARG BASE_IMAGE=python:${PYTHON_VERSION}-slim-bookworm
 
 # --- Aşama 1: Builder (Her zaman Python temelli) ---
-FROM ${BASE_IMAGE} AS builder
+# HATA DÜZELTME: Builder aşamasının temel imajı, build araçlarını ve Python'u içeren
+# sabit bir imaj olmalıdır. Dinamik BASE_IMAGE kullanımı burada hataya neden oluyordu.
+FROM python:3.11-slim-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
@@ -19,7 +21,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 # Pip'i güvenli şekilde yükle
-# HATA DÜZELTME: 'python' komutu nvidia/cuda imajında bulunmuyor. 'python3' kullanıldı.
 RUN python3 -m ensurepip --upgrade
 RUN python3 -m pip install --no-cache-dir --upgrade pip
 
@@ -30,7 +31,7 @@ RUN pip install --no-cache-dir --timeout 300 \
     soundfile==0.12.1 \
     librosa==0.10.1
 
-# PyTorch'u doğru kaynaktan kur
+# PyTorch'u doğru kaynaktan kur (Builder aşaması için CPU yeterlidir)
 RUN pip install --no-cache-dir --timeout 600 \
     torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 \
     --index-url https://download.pytorch.org/whl/cpu
