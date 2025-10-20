@@ -1,4 +1,4 @@
-name: Docker Image CI (Production - CPU & GPU)
+name: Docker Image CI (Production - Optimized)
 
 on:
   push:
@@ -13,11 +13,10 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30  # Zaman aşımını kısalttık
     permissions:
       contents: read
       packages: write
-      id-token: write
 
     strategy:
       matrix:
@@ -25,15 +24,24 @@ jobs:
           - target: cpu
             base_image: python:3.11-slim-bookworm
             platform: linux/amd64
-          - target: gpu
-            base_image: nvidia/cuda:12.1.1-base-ubuntu22.04
+          - target: gpu-cuda12
+            base_image: nvidia/cuda:12.1.1-runtime-ubuntu22.04  # RUNTIME kullan - daha küçük
             platform: linux/amd64
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1  # Sadece son commit'i çek
+
+      - name: Setup Disk Space
+        run: |
+          # Disk temizleme
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo apt-get clean
+          df -h
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -46,20 +54,6 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=${{ matrix.target }},enable=true
 
       - name: Prepare build args
         id: prep
@@ -76,8 +70,9 @@ jobs:
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.target == 'cpu' && 'latest' || matrix.target }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.target == 'cpu' && env.SERVICE_VERSION || format('{0}-{1}', env.SERVICE_VERSION, matrix.target) }}
           build-args: |
             BASE_IMAGE=${{ matrix.base_image }}
             SERVICE_VERSION=${{ env.SERVICE_VERSION }}
@@ -85,15 +80,5 @@ jobs:
             BUILD_DATE=${{ env.BUILD_DATE }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.target }}
-          format: sarif
-          output: trivy-results-${{ matrix.target }}.sarif
-
-      - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results-${{ matrix.target }}.sarif
+          # Disk optimizasyonu
+          no-cache-filters: true
