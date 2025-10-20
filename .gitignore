@@ -26,3 +26,4 @@ htmlcov/
 .pytest_cache/
 # Model cache (Büyük dosyalar)
 *.model
+.env.generated

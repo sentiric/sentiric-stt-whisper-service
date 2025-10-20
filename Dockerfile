@@ -38,7 +38,9 @@ ARG SERVICE_VERSION="0.0.0"
 ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_VERSION} \
     PYTHONUNBUFFERED=1 \
     HF_HOME="/app/model-cache" \
-    PYTHONPATH="/app"
+    PYTHONPATH="/app" \
+    NUMBA_CACHE_DIR="/tmp/numba_cache" \
+    MPLCONFIGDIR="/tmp/matplotlib_cache"
 
 # Runtime bağımlılıkları
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -48,6 +50,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Kullanıcı oluştur
 RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
+
+# Cache dizinlerini oluştur ve yetkilendir
+RUN mkdir -p /tmp/numba_cache /tmp/matplotlib_cache && \
+    chown -R appuser:appgroup /tmp/numba_cache /tmp/matplotlib_cache
 
 # Builder aşamasından kurulan Python paketlerini kopyala
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages

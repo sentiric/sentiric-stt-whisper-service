@@ -1,0 +1,68 @@
+# docker-compose.dev.yml
+# Sentiric Geliştirme Ortamı için Docker Compose dosyası
+# Bu dosya, Sentiric platformunun geliştirme ortamında çalıştırılması için gerekli
+
+
+networks:
+  sentiric-net:
+    name: "${NETWORK_NAME:-sentiric-net}"
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${NETWORK_SUBNET}
+          gateway: ${NETWORK_GATEWAY}
+
+volumes:
+ 
+  # [capability-stt]: Konuşma Tanıma Yetenekleri (STT Capabilities)
+  # --------------------------------------------------
+  stt_whisper_cache:
+
+
+services:
+
+  # [capability-stt]: Konuşma Tanıma Yetenekleri (STT Capabilities)
+  # -------------------------------------------------- 
+
+  #  stt-streaming-service 
+
+  stt-whisper-service:
+    build: 
+      context: ../sentiric-stt-whisper-service
+      # args:
+      #   # Varsayılan olarak CPU imajını kullan
+      #   # BASE_IMAGE: python:3.11-slim-bookworm
+      #   # # BASE_IMAGE değerini GPU imajı ile ez
+      #   # BASE_IMAGE: nvidia/cuda:12.1.1-runtime-ubuntu22.04    
+    env_file: ["${ENV_FILE_PATH}"]    
+    volumes: 
+      - "${CERTIFICATES_REPO_PATH}:/sentiric-certificates:ro"
+      - stt_whisper_cache:/app/model-cache
+    ports: 
+      - "${STT_WHISPER_SERVICE_HTTP_PORT:-15030}:${STT_WHISPER_SERVICE_HTTP_PORT:-15030}"
+      - "${STT_WHISPER_SERVICE_GRPC_PORT:-15031}:${STT_WHISPER_SERVICE_GRPC_PORT:-15031}"
+      - "${STT_WHISPER_SERVICE_METRICS_PORT:-15032}:${STT_WHISPER_SERVICE_METRICS_PORT:-15032}"          
+    networks:
+      sentiric-net:
+        ipv4_address: ${STT_WHISPER_SERVICE_IPV4_ADDRESS}       
+    dns:
+      - ${DISCOVERY_SERVICE_IPV4_ADDRESS}
+      - ${PRIMARY_DNS:-8.8.8.8}
+      - ${SECONDARY_DNS:-1.1.1.1}    
+    dns_search:
+      - ${DISCOVERY_DNS_SEARCH_DOMAIN}   
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${STT_WHISPER_SERVICE_HTTP_PORT:-15030}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10m
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]      
+    # Bu servisin doğrudan bir bağımlılığı yok.

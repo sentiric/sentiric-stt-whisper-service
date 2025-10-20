@@ -16,7 +16,10 @@ logger = structlog.get_logger(__name__)
 TRANSCRIPTION_DURATION = Histogram('transcription_duration_seconds', 'Transcription processing time in seconds.')
 AUDIO_DURATION = Histogram('audio_duration_seconds', 'Duration of the audio file being transcribed in seconds.')
 
-# app/api/v1/endpoints.py - Geliştirilmiş güvenlik kontrolleri
+# Numba cache sorununu önlemek için librosa importundan önce environment ayarı
+import os
+os.environ['NUMBA_CACHE_DIR'] = '/tmp/numba_cache'
+
 @router.post("/transcribe")
 async def create_transcription(
     request: Request,
@@ -54,10 +57,26 @@ async def create_transcription(
     try:
         audio_bytes = await file.read()
         
-        # librosa.get_duration sesin orijinal süresini byte'lardan hesaplar
-        original_duration = librosa.get_duration(y=librosa.load(io.BytesIO(audio_bytes), sr=None)[0])
+        # Librosa get_duration yerine alternatif süre hesaplama
+        try:
+            # Wave dosyası ise frame sayısından süre hesapla
+            import wave
+            with wave.open(io.BytesIO(audio_bytes)) as wav_file:
+                frames = wav_file.getnframes()
+                rate = wav_file.getframerate()
+                original_duration = frames / float(rate)
+        except:
+            # Diğer formatlar için librosa kullan (cache sorunu olmaz)
+            audio_for_duration, _ = librosa.load(
+                io.BytesIO(audio_bytes),
+                sr=None,
+                mono=True
+            )
+            original_duration = len(audio_for_duration) / librosa.get_samplerate(io.BytesIO(audio_bytes))
+        
         AUDIO_DURATION.observe(original_duration)
 
+        # Asıl transkripsiyon için audio processing
         audio_array, _ = librosa.load(
             io.BytesIO(audio_bytes),
             sr=settings.STT_WHISPER_SERVICE_TARGET_SAMPLE_RATE,
