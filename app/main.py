@@ -4,7 +4,8 @@ import structlog
 import time
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from prometheus_fastapi_instrumentator import Instrumentator, Info
+from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Gauge
 
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -15,29 +16,36 @@ from app.services.grpc_server import serve as serve_grpc
 logger = structlog.get_logger(__name__)
 
 def add_custom_instrumentator(app: FastAPI):
-    instrumentator = Instrumentator(
-        should_instrument_requests=True,
-        should_instrument_responses=True,
-        excluded_handlers=["/metrics", "/health", "/docs", "/openapi.json"],
+    # 7.0.0 versiyonu için Instrumentator
+    instrumentator = Instrumentator()
+    
+    # Custom metric'leri ekle
+    app_info_gauge = Gauge(
+        "app_info",
+        "Application information",
+        ["service_version", "model_size", "device"]
     )
-    # Servis bilgilerini metrik etiketlerine ekle
-    instrumentator.add(Info(
-        {
-            "service_version": settings.SERVICE_VERSION,
-            "model_size": settings.STT_WHISPER_SERVICE_MODEL_SIZE,
-            "device": settings.STT_WHISPER_SERVICE_DEVICE
-        },
-        "app_info"
-    ))
-    instrumentator.add(
-        "transcription_duration_seconds",
-        "Histogram of transcription processing time.",
-    )
-    instrumentator.add(
-        "audio_duration_seconds",
-        "Histogram of transcribed audio duration.",
-    )
-    instrumentator.instrument(app).expose(app, endpoint="/metrics", port=settings.STT_WHISPER_SERVICE_METRICS_PORT, include_in_schema=False)
+    
+    # Metric değerlerini set et
+    app_info_gauge.labels(
+        service_version=settings.SERVICE_VERSION,
+        model_size=settings.STT_WHISPER_SERVICE_MODEL_SIZE,
+        device=settings.STT_WHISPER_SERVICE_DEVICE
+    ).set(1)
+    
+    # Instrumentator'u uygula
+    instrumentator.instrument(app)
+    
+    # Metrics endpoint'ini ayrıca ekle
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics():
+        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+        from fastapi.responses import Response
+        return Response(
+            content=generate_latest(),
+            media_type=CONTENT_TYPE_LATEST
+        )
+    
     return instrumentator
 
 @asynccontextmanager

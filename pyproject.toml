@@ -19,15 +19,13 @@ ctranslate2 = "^4.0.0"
 soundfile = "^0.12.1"
 librosa = "^0.10.1"
 numpy = "^1.26.4"
-av = { version = "^11.0.0", optional = true }  # Optional yap
-grpcio = "^1.64.1"
-grpcio-tools = "^1.64.1"
+av = { version = "^11.0.0", optional = true }
 torch = "^2.3.0"
-sentiric-contracts-py = { git = "https://github.com/sentiric/sentiric-contracts.git", tag = "v1.9.1" }
-# HATA DÜZELTME: 'Info' sınıfı için kütüphane sürümü yükseltildi.
-prometheus-fastapi-instrumentator = "^7.0.0"
+sentiric-contracts-py = { git = "https://github.com/sentiric/sentiric-contracts.git", tag = "v1.9.2" }
 aiofiles = "^23.2.1"
 psutil = "^5.9.8"
+prometheus-fastapi-instrumentator = "^7.0.0"
+
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"

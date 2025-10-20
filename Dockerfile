@@ -1,89 +1,66 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v8.6 (STABLE)
+#    SENTIRIC STT-WHISPER-SERVICE - DOCKERFILE v9.0 (POETRY NATIVE)
 # =================================================================
-# Build argümanları ile temel imajı dinamik olarak seç (sadece final aşaması için)
-ARG PYTHON_VERSION=3.11
-ARG BASE_IMAGE=python:${PYTHON_VERSION}-slim-bookworm
+ARG BASE_IMAGE=python:3.11-slim-bookworm
 
-# --- Aşama 1: Builder (Her zaman Python temelli) ---
-# HATA DÜZELTME: Builder aşamasının temel imajı, build araçlarını ve Python'u içeren
-# sabit bir imaj olmalıdır. Dinamik BASE_IMAGE kullanımı burada hataya neden oluyordu.
+# --- Aşama 1: Builder (Poetry ile Bağımlılıkları Kurma) ---
 FROM python:3.11-slim-bookworm AS builder
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_CACHE_DIR='/var/cache/pypoetry' \
+    PIP_NO_CACHE_DIR=off \
+    PIP_DISABLE_PIP_VERSION_CHECK=on
+
 WORKDIR /app
 
-# Temel bağımlılıklar (optimize edilmiş)
+# Sistem bağımlılıkları (TÜM FFMPEG DEV PAKETLERİ EKLENDİ)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git curl pkg-config \
-    ffmpeg libavcodec-dev libavformat-dev libswscale-dev libavdevice-dev \
-    libsndfile1 portaudio19-dev \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+    ffmpeg libavcodec-dev libavformat-dev libswscale-dev libavdevice-dev libavfilter-dev libavutil-dev libswresample-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Pip'i güvenli şekilde yükle
-RUN python3 -m ensurepip --upgrade
-RUN python3 -m pip install --no-cache-dir --upgrade pip
+# Builder aşamasında protobuf'u önce kurun
+RUN pip install --upgrade pip && pip install poetry
 
-# Önce temel bağımlılıkları kur
-COPY requirements.txt .
-RUN pip install --no-cache-dir --timeout 300 \
-    numpy==1.26.4 \
-    soundfile==0.12.1 \
-    librosa==0.10.1
+# Sadece bağımlılık tanımlarını kopyala ve kur
+COPY poetry.lock pyproject.toml ./
+RUN poetry install --only main --no-root --no-directory
 
-# PyTorch'u doğru kaynaktan kur (Builder aşaması için CPU yeterlidir)
-RUN pip install --no-cache-dir --timeout 600 \
-    torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 \
-    --index-url https://download.pytorch.org/whl/cpu
-
-# Kalan bağımlılıkları kur
-RUN pip install --no-cache-dir --timeout 300 -r requirements.txt
-
-# --- Aşama 2: Final Image (Dinamik Temel) ---
+# --- Aşama 2: Final Image (Çalışma Ortamı) ---
 FROM ${BASE_IMAGE} AS final
 WORKDIR /app
 
 ARG GIT_COMMIT="unknown"
 ARG BUILD_DATE="unknown"
 ARG SERVICE_VERSION="0.0.0"
-ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_VERSION} PYTHONUNBUFFERED=1 \
-    PATH="/usr/local/bin:$PATH" \
+ENV GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} SERVICE_VERSION=${SERVICE_VERSION} \
+    PYTHONUNBUFFERED=1 \
     HF_HOME="/app/model-cache" \
     PYTHONPATH="/app"
 
-# Runtime bağımlılıklar
+# Runtime bağımlılıkları
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg libsndfile1 curl ca-certificates \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
-
-# CUDA için (GPU image) - sadece gerekli kütüphaneler
-RUN if [ -x "$(command -v nvidia-smi)" ]; then \
-        echo "CUDA detected, installing runtime libraries..." && \
-        apt-get update && apt-get install -y --no-install-recommends \
-        cuda-cudart-12-1 cuda-nvtx-12-1 && \
-        apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/*; \
-    else \
-        echo "No CUDA detected, skipping CUDA libraries"; \
-    fi
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Kullanıcı oluştur
 RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
 
-# Python paketlerini kopyala
+# Builder aşamasından kurulan Python paketlerini kopyala
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Uygulama kodunu kopyala
 COPY --chown=appuser:appgroup ./app ./app
 
-# Model cache dizini oluştur
-RUN mkdir -p /app/model-cache && \
-    chown -R appuser:appgroup /app/model-cache
+# Model cache dizini oluştur ve yetkilendir
+RUN mkdir -p /app/model-cache && chown -R appuser:appgroup /app
 
 USER appuser
 
-# Sağlık kontrolü için healtcheck ekle
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:15030/health || exit 1
 
