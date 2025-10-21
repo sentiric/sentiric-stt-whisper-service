@@ -1,5 +1,5 @@
 # docker-compose.dev.yml
-# Sentiric Geliştirme Ortamı - Optimized Production Ready
+# STABLE VERSION - CPU & GPU Compatible
 
 networks:
   sentiric-net:
@@ -20,6 +20,8 @@ services:
       args:
         BASE_IMAGE: ${STT_WHISPER_BASE_IMAGE:-python:3.11-slim-bookworm}
     env_file: ["${ENV_FILE_PATH}"]    
+    environment:
+      - STT_WHISPER_SERVICE_DEVICE=auto  # Hem CPU hem GPU destekli
     volumes: 
       - "${CERTIFICATES_REPO_PATH}:/sentiric-certificates:ro"
       - stt_whisper_cache:/app/model-cache
@@ -51,17 +53,8 @@ services:
         reservations:
           memory: 1G
           cpus: '1.0'
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid

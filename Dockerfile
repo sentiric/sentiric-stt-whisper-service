@@ -1,5 +1,6 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - OPTIMIZED DOCKERFILE v11.0
+#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v12.0
+#    CPU & GPU UYUMLU - TAM ÇÖZÜM
 # =================================================================
 ARG BASE_IMAGE=python:3.11-slim-bookworm
 
@@ -8,20 +9,31 @@ FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /app
 
-# Sistem bağımlılıkları - MİNİMAL
+# TÜM gerekli sistem bağımlılıkları - PyAV için pkg-config EKLENDİ
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    pkg-config \ 
+    cmake \
+    git \
     ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
     libsndfile1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Poetry kurulumu
-RUN pip install --no-cache-dir poetry
+RUN pip install --no-cache-dir poetry==1.8.2
 
-# Bağımlılıkları kopyala ve kur
+# Bağımlılıkları kopyala ve kur - VIRTUALENV OLMADAN
 COPY pyproject.toml poetry.lock ./
-RUN poetry install --only main --no-root --no-directory
+RUN poetry config virtualenvs.create false && \
+    poetry install --only main --no-root --no-interaction
 
 # --- Stage 2: Production Image ---
 FROM ${BASE_IMAGE} AS production
@@ -33,7 +45,7 @@ ARG GIT_COMMIT="unknown"
 ARG BUILD_DATE="unknown" 
 ARG SERVICE_VERSION="0.0.0"
 
-# Environment variables - OPTIMIZED
+# Environment variables
 ENV GIT_COMMIT=${GIT_COMMIT} \
     BUILD_DATE=${BUILD_DATE} \
     SERVICE_VERSION=${SERVICE_VERSION} \
@@ -47,13 +59,23 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     PYTHONWARNINGS=ignore \
     # Model cache
     HF_HOME=/app/model-cache \
-    HF_HUB_DISABLE_SYMLINKS_WARNING=1
+    HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
+    # CUDA auto-detection
+    STT_WHISPER_SERVICE_DEVICE=auto
 
-# Runtime dependencies - MİNİMAL
+# RUNTIME dependencies - PyAV çalışması için gerekli kütüphaneler
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    libavcodec60 \
+    libavformat60 \ 
+    libavdevice60 \
+    libavfilter9 \
+    libavutil58 \
+    libswscale7 \
+    libswresample4 \
     libsndfile1 \
     curl \
+    pkg-config \ 
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
