@@ -1,6 +1,6 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v12.0
-#    CPU & GPU UYUMLU - TAM ÇÖZÜM
+#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v12.1
+#    CPU & GPU UYUMLU - KESİN ÇÖZÜM
 # =================================================================
 ARG BASE_IMAGE=python:3.11-slim-bookworm
 
@@ -9,7 +9,7 @@ FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /app
 
-# TÜM gerekli sistem bağımlılıkları - PyAV için pkg-config EKLENDİ
+# TÜM gerekli sistem bağımlılıkları - DEBIAN BOOKWORM UYUMLU
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \ 
@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavutil-dev \
     libswscale-dev \
     libswresample-dev \
-    libsndfile1 \
+    libsndfile1-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -63,19 +63,20 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     # CUDA auto-detection
     STT_WHISPER_SERVICE_DEVICE=auto
 
-# RUNTIME dependencies - PyAV çalışması için gerekli kütüphaneler
+# RUNTIME dependencies - DEBIAN BOOKWORM UYUMLU
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    libavcodec60 \
-    libavformat60 \ 
-    libavdevice60 \
-    libavfilter9 \
-    libavutil58 \
-    libswscale7 \
-    libswresample4 \
     libsndfile1 \
     curl \
-    pkg-config \ 
+    pkg-config \
+    # PyAV runtime dependencies - VERSİYONSUZ
+    libavcodec-dev \
+    libavformat-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
