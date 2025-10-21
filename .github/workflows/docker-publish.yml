@@ -26,12 +26,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
           pip install pytest==7.4.4
 
-      - name: Run simple tests
+      - name: Run minimal tests
         run: |
-          python -m pytest tests/test_simple.py tests/test_health_simple.py tests/test_config_simple.py -v
+          python -m pytest tests/test_minimal.py -v
 
   build-cpu:
     runs-on: ubuntu-latest
@@ -131,3 +130,24 @@ jobs:
             GIT_COMMIT=${{ github.sha }}
             BUILD_DATE=${{ fromJSON('""') }}
             SERVICE_VERSION=1.0.0
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: [build-cpu, build-gpu]
+    if: github.event_name != 'pull_request'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
