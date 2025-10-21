@@ -1,7 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
 import structlog
-import time
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -11,32 +10,35 @@ from app.core.config import settings
 from app.core.logging import setup_logging
 from app.api.v1.endpoints import router as api_router
 from app.services.whisper_service import WhisperTranscriber
-from app.services.grpc_server import serve as serve_grpc
 
 logger = structlog.get_logger(__name__)
 
+# GRPC server'ı opsiyonel yap - hata durumunda devre dışı bırak
+async def setup_grpc_server(transcriber):
+    """GRPC server'ı güvenli şekilde başlat"""
+    try:
+        from app.services.grpc_server import serve as serve_grpc
+        return await serve_grpc(transcriber)
+    except Exception as e:
+        logger.warning("GRPC server başlatılamadı, devre dışı bırakılıyor", error=str(e))
+        return None
+
 def add_custom_instrumentator(app: FastAPI):
-    # 7.0.0 versiyonu için Instrumentator
     instrumentator = Instrumentator()
-    
-    # Custom metric'leri ekle
     app_info_gauge = Gauge(
         "app_info",
         "Application information",
         ["service_version", "model_size", "device"]
     )
     
-    # Metric değerlerini set et
     app_info_gauge.labels(
         service_version=settings.SERVICE_VERSION,
         model_size=settings.STT_WHISPER_SERVICE_MODEL_SIZE,
         device=settings.STT_WHISPER_SERVICE_DEVICE
     ).set(1)
     
-    # Instrumentator'u uygula
     instrumentator.instrument(app)
     
-    # Metrics endpoint'ini ayrıca ekle
     @app.get("/metrics", include_in_schema=False)
     async def metrics():
         from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
@@ -53,16 +55,15 @@ async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("🚀 STT Whisper Service başlatılıyor...")
     
-    # Model yükleme işlemini async olarak başlat
+    # Model yükleme
     transcriber_instance = WhisperTranscriber()
     
     try:
-        # Model yükleme için timeout ekle
         await asyncio.wait_for(
             asyncio.get_event_loop().run_in_executor(
                 None, transcriber_instance.load_model
             ), 
-            timeout=300.0  # 5 dakika timeout
+            timeout=300.0
         )
     except asyncio.TimeoutError:
         logger.error("Model yükleme zaman aşımına uğradı")
@@ -74,17 +75,17 @@ async def lifespan(app: FastAPI):
     app.state.transcriber = transcriber_instance
     app.state.model_ready = transcriber_instance.model_loaded
 
-    # Model hazır değilse gRPC sunucusunu başlatma
+    # GRPC server'ı güvenli şekilde başlat
     grpc_server = None
     if app.state.model_ready:
-        grpc_server = await serve_grpc(transcriber_instance)
+        grpc_server = await setup_grpc_server(transcriber_instance)
     else:
-        logger.error("❌ Model yüklenemediği için gRPC sunucusu başlatılmıyor")
+        logger.error("❌ Model yüklenemediği için GRPC sunucusu başlatılmıyor")
     
     yield
     
     if grpc_server:
-        logger.info("gRPC sunucusu durduruluyor...")
+        logger.info("GRPC sunucusu durduruluyor...")
         await grpc_server.stop(grace=1)
 
 app = FastAPI(
