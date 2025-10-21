@@ -2,7 +2,12 @@ import pytest
 import pytest_asyncio
 import asyncio
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+import sys
+import os
+
+# Add the app directory to Python path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.main import app
 from app.core.config import settings
@@ -18,9 +23,32 @@ def event_loop():
 
 @pytest.fixture
 def client():
-    """FastAPI test client fixture"""
-    with TestClient(app) as test_client:
-        yield test_client
+    """FastAPI test client fixture with mocked model loading"""
+    # Mock the model loading to avoid permission issues in CI
+    with patch('app.services.whisper_service.WhisperModel'):
+        with patch('app.main.WhisperTranscriber') as mock_transcriber_class:
+            # Create a mock transcriber instance
+            mock_transcriber = MagicMock()
+            mock_transcriber.model_loaded = True
+            mock_transcriber.device = 'cpu'
+            mock_transcriber.transcribe.return_value = {
+                "text": "test transcription",
+                "language": "en", 
+                "language_probability": 0.95,
+                "duration": 2.5,
+                "segment_count": 1
+            }
+            mock_transcriber_class.return_value = mock_transcriber
+            
+            # Mock the load_model method to succeed immediately
+            mock_transcriber.load_model = MagicMock()
+            
+            with TestClient(app) as test_client:
+                # Set up the app state for testing
+                test_client.app.state.transcriber = mock_transcriber
+                test_client.app.state.model_ready = True
+                test_client.app.state.grpc_server = None
+                yield test_client
 
 
 @pytest.fixture
@@ -28,6 +56,7 @@ def mock_transcriber():
     """Mock transcriber fixture"""
     mock = MagicMock()
     mock.model_loaded = True
+    mock.device = 'cpu'
     mock.transcribe.return_value = {
         "text": "test transcription",
         "language": "en", 
@@ -54,3 +83,13 @@ def sample_audio_bytes():
         wav_file.writeframes(b'\x00\x00' * 160)  # Silent audio
     
     return buffer.getvalue()
+
+
+@pytest.fixture(autouse=True)
+def mock_environment():
+    """Mock environment variables for testing"""
+    with patch.dict(os.environ, {
+        'STT_WHISPER_SERVICE_MODEL_CACHE_DIR': '/tmp/test-cache',
+        'HF_HOME': '/tmp/test-cache'
+    }):
+        yield

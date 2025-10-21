@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 from app.services.whisper_service import WhisperTranscriber
 
 
@@ -19,7 +19,7 @@ def test_load_model_success(mock_whisper_model):
     transcriber = WhisperTranscriber()
     
     # Mock the WhisperModel instance
-    mock_instance = Mock()
+    mock_instance = MagicMock()
     mock_whisper_model.return_value = mock_instance
     
     transcriber.load_model()
@@ -43,7 +43,7 @@ def test_load_model_failure(mock_whisper_model):
     assert transcriber.model_loaded is False
 
 
-@patch('app.services.whisper_service.WhisperModel')
+@patch('app.services.whisper_service.WhisperModel') 
 def test_transcribe_without_loaded_model(mock_whisper_model):
     """Test transcribe without loaded model raises error"""
     transcriber = WhisperTranscriber()
@@ -66,7 +66,7 @@ def test_transcribe_success(mock_whisper_model):
     mock_info.language_probability = 0.95
     mock_info.duration = 2.5
     
-    mock_instance = Mock()
+    mock_instance = MagicMock()
     mock_instance.transcribe.return_value = ([mock_segment], mock_info)
     mock_whisper_model.return_value = mock_instance
     
@@ -81,3 +81,28 @@ def test_transcribe_success(mock_whisper_model):
     assert result["language_probability"] == 0.95
     assert result["duration"] == 2.5
     assert result["segment_count"] == 1
+
+
+@patch('app.services.whisper_service.WhisperModel')
+def test_transcribe_with_language_auto_detection(mock_whisper_model):
+    """Test transcription with auto language detection"""
+    transcriber = WhisperTranscriber()
+    
+    mock_segment = Mock()
+    mock_segment.text = "test transcription"
+    mock_info = Mock()
+    mock_info.language = "tr"  # Auto-detected Turkish
+    mock_info.language_probability = 0.98
+    mock_info.duration = 3.0
+    
+    mock_instance = MagicMock()
+    mock_instance.transcribe.return_value = ([mock_segment], mock_info)
+    mock_whisper_model.return_value = mock_instance
+    
+    transcriber.load_model()
+    
+    audio_data = np.random.random(24000).astype(np.float32)  # 1.5 seconds of audio
+    result = transcriber.transcribe(audio_data)  # No language specified
+    
+    assert result["language"] == "tr"
+    assert result["language_probability"] == 0.98

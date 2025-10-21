@@ -1,21 +1,53 @@
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import patch, MagicMock
 
-from app.main import app
 
-
-def test_health_endpoint(client):
+def test_health_endpoint():
     """Test health endpoint returns correct structure"""
-    response = client.get("/health")
-    
-    assert response.status_code in [200, 503]  # Could be healthy or not ready
-    data = response.json()
-    
-    assert "status" in data
-    assert "model_ready" in data
-    assert "gpu_available" in data
-    assert "service_version" in data
-    assert "model_size" in data
+    with patch('app.services.whisper_service.WhisperModel'):
+        with patch('app.main.WhisperTranscriber') as mock_transcriber_class:
+            mock_transcriber = MagicMock()
+            mock_transcriber.model_loaded = True
+            mock_transcriber.device = 'cpu'
+            mock_transcriber_class.return_value = mock_transcriber
+            
+            with TestClient(app) as test_client:
+                test_client.app.state.transcriber = mock_transcriber
+                test_client.app.state.model_ready = True
+                
+                response = test_client.get("/health")
+                
+                assert response.status_code == 200
+                data = response.json()
+                
+                assert "status" in data
+                assert data["status"] == "healthy"
+                assert data["model_ready"] == True
+                assert "gpu_available" in data
+                assert "service_version" in data
+                assert "model_size" in data
+
+
+def test_health_endpoint_unhealthy():
+    """Test health endpoint when service is unhealthy"""
+    with patch('app.services.whisper_service.WhisperModel'):
+        with patch('app.main.WhisperTranscriber') as mock_transcriber_class:
+            mock_transcriber = MagicMock()
+            mock_transcriber.model_loaded = False
+            mock_transcriber_class.return_value = mock_transcriber
+            
+            with TestClient(app) as test_client:
+                test_client.app.state.transcriber = mock_transcriber
+                test_client.app.state.model_ready = False
+                
+                response = test_client.get("/health")
+                
+                assert response.status_code == 503
+                data = response.json()
+                
+                assert data["status"] == "unhealthy"
+                assert data["model_ready"] == False
 
 
 def test_root_endpoint(client):
