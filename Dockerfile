@@ -14,10 +14,11 @@ ARG GIT_COMMIT="unknown"
 ARG BUILD_DATE="unknown" 
 ARG SERVICE_VERSION="0.0.0"
 
-# Install build dependencies
+# Install build dependencies including git
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching

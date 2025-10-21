@@ -2,7 +2,7 @@
 # Core Framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-httpx==0.27.0  # ✅ HTTPX EKLENDİ!
+httpx==0.27.0
 
 # STT Engine  
 faster-whisper==1.0.2
