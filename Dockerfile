@@ -48,6 +48,10 @@ RUN pip install --no-cache-dir --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# ❌ :
+# COPY pyproject.toml .
+# RUN pip install --no-cache-dir .
+
 # App user
 RUN addgroup --system --gid 1001 appgroup \
     && adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
