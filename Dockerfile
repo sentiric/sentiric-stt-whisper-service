@@ -41,8 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Python ve pip upgrade
 RUN pip install --no-cache-dir --upgrade pip
 
-# ÖNCE protobuf'u 6.33.0 kur - SENTIRIC-CONTRACTS İLE AYNI!
-RUN pip install --no-cache-dir protobuf==6.33.0
+# ✅ YERİNE BUNU KOY veya TAMAMEN SİL:
+# Protobuf zaten requirements.txt'den geliyor
 
 # Python paketlerini direkt pip ile kur
 COPY requirements.txt .

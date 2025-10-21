@@ -5,8 +5,11 @@ protobuf>=5.26.1,<7.0.0
 grpcio>=1.62.0
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-whisper-openai==1.3.0
-openai-whisper==20231117
+
+# WHISPER PAKETLERİNİ DÜZELT:
+openai-whisper==20231117  # ✅ BU PAKET DOĞRU
+# whisper-openai==1.3.0   # ❌ BU PAKET SİLİNDİ - BULUNAMADI
+
 numpy==1.26.4
 librosa==0.10.1
 soundfile==0.12.1
