@@ -1,9 +1,8 @@
-name: Docker GPU Image
+name: Docker GPU Image (No Cache)
 
 on:
   push:
     branches: [ "main" ]
-  # Sadece main branch'de GPU build - disk alanı için
 
 jobs:
   build-gpu:
@@ -26,10 +25,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push GPU image
+      - name: Build and push GPU image (no cache)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.gpu
           push: true
           tags: ghcr.io/${{ github.repository }}:gpu-latest
+          no-cache: true
