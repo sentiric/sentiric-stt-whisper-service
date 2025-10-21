@@ -1,4 +1,4 @@
-# === SENTIRIC STT SERVICE - STABLE ===
+# === SENTIRIC STT SERVICE - COMPLETE ===
 protobuf>=5.26.1,<7.0.0
 grpcio>=1.62.0
 fastapi==0.104.1
@@ -12,6 +12,8 @@ python-multipart==0.0.6
 prometheus-client==0.20.0
 prometheus-fastapi-instrumentator==6.0.0
 structlog==23.3.0
+pydantic-settings==2.4.0
+pydantic==2.12.3
 sentiric-contracts-py@git+https://github.com/sentiric/sentiric-contracts.git@v1.9.3
 pytest==7.4.4
 black==23.12.1
