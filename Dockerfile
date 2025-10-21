@@ -26,7 +26,8 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     PYTHONWARNINGS=ignore \
     HF_HOME=/app/model-cache \
     HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
-    STT_WHISPER_SERVICE_DEVICE=auto
+    STT_WHISPER_SERVICE_DEVICE=auto \
+    STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=600
 
 # Runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
