@@ -1,6 +1,6 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v16.0
-#    PROTOBUF VERSİYON SORUNU ÇÖZÜLDÜ - KESİN ÇÖZÜM
+#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v17.0
+#    PROTOBUF 6.33.0 - SENTIRIC-CONTRACTS İLE UYUMLU
 # =================================================================
 ARG BASE_IMAGE=python:3.11-slim-bookworm
 
@@ -41,8 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Python ve pip upgrade
 RUN pip install --no-cache-dir --upgrade pip
 
-# ÖNCE protobuf'u doğru versiyonda kur - KRİTİK!
-RUN pip install --no-cache-dir protobuf==5.29.5
+# ÖNCE protobuf'u 6.33.0 kur - SENTIRIC-CONTRACTS İLE AYNI!
+RUN pip install --no-cache-dir protobuf==6.33.0
 
 # Python paketlerini direkt pip ile kur
 COPY requirements.txt .
