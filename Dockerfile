@@ -1,6 +1,6 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v12.1
-#    CPU & GPU UYUMLU - KESİN ÇÖZÜM
+#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v13.0
+#    TAM ÇÖZÜM - POETRY LOCK SORUNSUZ
 # =================================================================
 ARG BASE_IMAGE=python:3.11-slim-bookworm
 
@@ -9,30 +9,24 @@ FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /app
 
-# TÜM gerekli sistem bağımlılıkları - DEBIAN BOOKWORM UYUMLU
+# Sistem bağımlılıkları
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    pkg-config \ 
-    cmake \
-    git \
+    pkg-config \
     ffmpeg \
-    libavcodec-dev \
-    libavformat-dev \
-    libavdevice-dev \
-    libavfilter-dev \
-    libavutil-dev \
-    libswscale-dev \
-    libswresample-dev \
-    libsndfile1-dev \
+    libsndfile1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Poetry kurulumu
 RUN pip install --no-cache-dir poetry==1.8.2
 
-# Bağımlılıkları kopyala ve kur - VIRTUALENV OLMADAN
+# Pyproject ve lock dosyalarını kopyala
 COPY pyproject.toml poetry.lock ./
-RUN poetry config virtualenvs.create false && \
+
+# Poetry lock senkronizasyonu ve kurulum
+RUN poetry lock --no-update && \
+    poetry config virtualenvs.create false && \
     poetry install --only main --no-root --no-interaction
 
 # --- Stage 2: Production Image ---
@@ -51,32 +45,20 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     SERVICE_VERSION=${SERVICE_VERSION} \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    # Performance optimizations
     NUMBA_DEBUG=0 \
     NUMBA_DISABLE_JIT=0 \
     NUMBA_CACHE_DIR=/tmp \
     LIBROSA_CACHE_LEVEL=0 \
     PYTHONWARNINGS=ignore \
-    # Model cache
     HF_HOME=/app/model-cache \
     HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
-    # CUDA auto-detection
     STT_WHISPER_SERVICE_DEVICE=auto
 
-# RUNTIME dependencies - DEBIAN BOOKWORM UYUMLU
+# Runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     curl \
-    pkg-config \
-    # PyAV runtime dependencies - VERSİYONSUZ
-    libavcodec-dev \
-    libavformat-dev \
-    libavdevice-dev \
-    libavfilter-dev \
-    libavutil-dev \
-    libswscale-dev \
-    libswresample-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
