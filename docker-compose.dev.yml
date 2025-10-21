@@ -1,7 +1,7 @@
 services:
   stt-whisper-service:
     build: 
-    context: ../sentiric-stt-whisper-service
+      context: ../sentiric-stt-whisper-service
     environment:
       - STT_WHISPER_SERVICE_DEVICE=cpu
     volumes: 
