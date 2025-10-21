@@ -1,9 +1,7 @@
 services:
   stt-whisper-service:
     build: 
-      context: .
-    env_file: 
-      - "../.env.generated"
+    context: ../sentiric-stt-whisper-service
     environment:
       - STT_WHISPER_SERVICE_DEVICE=cpu
     volumes: 
@@ -11,9 +9,6 @@ services:
       - "stt_whisper_cache:/app/model-cache"
     ports: 
       - "15030:15030"
-    networks:
-      sentiric-net:
-        ipv4_address: 10.88.50.3
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:15030/health"]
       interval: 30s
@@ -23,8 +18,3 @@ services:
 
 volumes:
   stt_whisper_cache:
-
-networks:
-  sentiric-net:
-    external: true
-    name: sentiric.cloud

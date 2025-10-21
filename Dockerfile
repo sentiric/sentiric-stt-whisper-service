@@ -1,35 +1,9 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v13.0
-#    TAM ÇÖZÜM - POETRY LOCK SORUNSUZ
+#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v14.0
+#    AV PAKETİ KALDIRILDI - KESİN ÇÖZÜM
 # =================================================================
 ARG BASE_IMAGE=python:3.11-slim-bookworm
 
-# --- Stage 1: Dependencies Builder ---
-FROM python:3.11-slim-bookworm AS builder
-
-WORKDIR /app
-
-# Sistem bağımlılıkları
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    pkg-config \
-    ffmpeg \
-    libsndfile1 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-# Poetry kurulumu
-RUN pip install --no-cache-dir poetry==1.8.2
-
-# Pyproject ve lock dosyalarını kopyala
-COPY pyproject.toml poetry.lock ./
-
-# Poetry lock senkronizasyonu ve kurulum
-RUN poetry lock --no-update && \
-    poetry config virtualenvs.create false && \
-    poetry install --only main --no-root --no-interaction
-
-# --- Stage 2: Production Image ---
 FROM ${BASE_IMAGE} AS production
 
 WORKDIR /app
@@ -54,7 +28,7 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
     STT_WHISPER_SERVICE_DEVICE=auto
 
-# Runtime dependencies
+# Runtime dependencies - SADECE GEREKLİ OLANLAR
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
@@ -62,13 +36,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# Python ve pip upgrade
+RUN pip install --no-cache-dir --upgrade pip
+
+# Python paketlerini direkt pip ile kur
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 # App user
 RUN addgroup --system --gid 1001 appgroup \
     && adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
-
-# Python packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Application code
 COPY --chown=appuser:appgroup ./app ./app
