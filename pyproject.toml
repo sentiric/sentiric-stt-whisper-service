@@ -13,16 +13,16 @@ dependencies = [
     "fastapi==0.104.1",
     "uvicorn[standard]==0.24.0",
     
-    # STT Engine - TORCH EKLENDİ! 🚨
+    # STT Engine
     "faster-whisper==1.0.2",
-    "torch==2.3.0",  # ✅ KRİTİK EKSİK!
+    "torch==2.3.0",
     
-    # Audio Processing - PYDUB EKLENDİ! 🚨
+    # Audio Processing
     "soundfile==0.12.1",
     "librosa==0.10.1", 
     "numpy==1.26.4",
     "python-multipart==0.0.6",
-    "pydub==0.25.1",  # ✅ KRİTİK EKSİK!
+    "pydub==0.25.1",
     
     # Configuration & Logging
     "pydantic==2.12.3",
@@ -47,6 +47,7 @@ dependencies = [
 dev = [
     "pytest==7.4.4",
     "pytest-asyncio==0.23.5",
+    "pytest-cov==4.1.0",
     "black==23.12.1", 
     "flake8==7.0.0",
     "httpx==0.27.0",
@@ -56,6 +57,32 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning"
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod"
+]
 
 [build-system]
 requires = ["setuptools", "wheel"]

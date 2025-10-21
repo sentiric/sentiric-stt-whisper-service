@@ -1,0 +1,1 @@
+"""Test package for STT Whisper Service"""
