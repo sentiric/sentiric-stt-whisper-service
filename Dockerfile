@@ -1,6 +1,6 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v14.0
-#    AV PAKETİ KALDIRILDI - KESİN ÇÖZÜM
+#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v15.0
+#    GIT EKLENDİ - KESİN ÇÖZÜM
 # =================================================================
 ARG BASE_IMAGE=python:3.11-slim-bookworm
 
@@ -28,11 +28,12 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
     STT_WHISPER_SERVICE_DEVICE=auto
 
-# Runtime dependencies - SADECE GEREKLİ OLANLAR
+# Runtime dependencies - GIT EKLENDİ
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     curl \
+    git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 

@@ -14,4 +14,4 @@ aiofiles==23.2.1
 psutil==5.9.8
 prometheus-client==0.20.0
 prometheus-fastapi-instrumentator==7.0.0
-git+https://github.com/sentiric/sentiric-contracts.git@v1.9.2
+sentiric-contracts-py @ git+https://github.com/sentiric/sentiric-contracts.git@v1.9.2
