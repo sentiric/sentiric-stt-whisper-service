@@ -1,0 +1,14 @@
+# === SENTIRIC STT SERVICE - MINIMAL ===
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+faster-whisper==1.0.2
+torch==2.3.0
+librosa==0.10.1
+soundfile==0.12.1
+numpy==1.26.4
+python-multipart==0.0.6
+pydantic-settings==2.4.0
+pydantic==2.12.3
+structlog==23.3.0
+prometheus-client==0.20.0
+aiofiles==23.2.1
