@@ -1,74 +1,102 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - GPU DOCKERFILE v20.0
-#    FASTER-WHISPER RESMİ DOCKERFILE - CUDA 12.3.2 + cuDNN 9
+#    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED v18.0
+#    CUDA 12.1 + MULTI-STAGE BUILD
 # =================================================================
-ARG STT_WHISPER_BASE_IMAGE=nvidia/cuda:12.3.2-cudnn9-runtime-ubuntu22.04
+ARG CUDA_VERSION=12.1.1-base-ubuntu22.04
+ARG PYTHON_VERSION=3.11
 
-FROM ${STT_WHISPER_BASE_IMAGE} AS production
+# Build stage for dependencies
+FROM nvidia/cuda:${CUDA_VERSION} AS gpu-builder
 
 WORKDIR /app
 
-# Build arg'lar
+# Build arguments
 ARG GIT_COMMIT="unknown"
 ARG BUILD_DATE="unknown" 
 ARG SERVICE_VERSION="0.0.0"
 
-# Environment variables - GPU DESTEKLİ
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python${PYTHON_VERSION} \
+    python3-pip \
+    gcc \
+    g++ \
+    ffmpeg \
+    libsndfile1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symbolic links for Python
+RUN ln -sf /usr/bin/python${PYTHON_VERSION} /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python
+
+# Copy requirements first for better caching
+COPY requirements.gpu.txt requirements.txt
+
+# Install Python dependencies with CUDA support
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Runtime stage
+FROM nvidia/cuda:${CUDA_VERSION} AS production
+
+WORKDIR /app
+
+# Build arguments
+ARG GIT_COMMIT="unknown"
+ARG BUILD_DATE="unknown" 
+ARG SERVICE_VERSION="0.0.0"
+
+# Environment variables
 ENV GIT_COMMIT=${GIT_COMMIT} \
     BUILD_DATE=${BUILD_DATE} \
     SERVICE_VERSION=${SERVICE_VERSION} \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    NUMBA_CACHE_DIR=/tmp/numba_cache \
+    NUMBA_DEBUG=0 \
     NUMBA_DISABLE_JIT=0 \
+    NUMBA_CACHE_DIR=/tmp \
     LIBROSA_CACHE_LEVEL=0 \
     PYTHONWARNINGS=ignore \
     HF_HOME=/app/model-cache \
     HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
     STT_WHISPER_SERVICE_DEVICE=cuda \
+    STT_WHISPER_SERVICE_COMPUTE_TYPE=float16 \
     STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=600 \
-    STT_WHISPER_SERVICE_COMPUTE_TYPE=float16 
+    PATH=/app/.local/bin:$PATH \
+    CUDA_VISIBLE_DEVICES=0
 
-# Runtime dependencies - FASTER-WHISPER RESMİ KURULUMU
-RUN apt-get update -y && apt-get install -y \
+# Install Python and runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python${PYTHON_VERSION} \
     python3-pip \
-    python3.10 \
-    python3.10-dev \
-    python3.10-venv \
     ffmpeg \
     libsndfile1 \
     curl \
-    git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Python 3.10'ı default yap
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
+# Create symbolic links for Python
+RUN ln -sf /usr/bin/python${PYTHON_VERSION} /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python
 
-# pip upgrade
-RUN pip3 install --no-cache-dir --upgrade pip
-
-# Python paketlerini kur - TORCH CUDA 12.3!
-COPY requirements.gpu.txt .
-RUN pip3 install --no-cache-dir -r requirements.gpu.txt
+# Copy installed packages from builder
+COPY --from=gpu-builder /root/.local /app/.local
 
 # App user
-RUN addgroup --system --gid 1001 appgroup \
-    && adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
+RUN groupadd --system --gid 1001 appgroup \
+    && useradd --system --no-create-home --uid 1001 --gid appgroup appuser
 
 # Application code
 COPY --chown=appuser:appgroup ./app ./app
 
 # Create cache directories
 RUN mkdir -p /app/model-cache /tmp/numba_cache \
-    && chown -R appuser:appgroup /app /tmp/numba_cache \
-    && chmod 777 /tmp/numba_cache
+    && chown -R appuser:appgroup /app /tmp/numba_cache
 
 USER appuser
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# Healthcheck with extended start period for GPU model loading
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -f http://localhost:${STT_WHISPER_SERVICE_HTTP_PORT:-15030}/health || exit 1
 
 EXPOSE 15030 15031 15032

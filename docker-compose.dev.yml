@@ -1,9 +1,13 @@
 services:
   stt-whisper-service:
+    image: ghcr.io/sentiric/sentiric-stt-whisper-service:latest
     build: 
-      context: ../sentiric-stt-whisper-service
+      context: .
+      dockerfile: Dockerfile
     environment:
       - STT_WHISPER_SERVICE_DEVICE=cpu
+      - STT_WHISPER_SERVICE_COMPUTE_TYPE=int8
+      - STT_WHISPER_SERVICE_MODEL_SIZE=medium
     volumes: 
       - "../sentiric-certificates:/sentiric-certificates:ro"
       - "stt_whisper_cache:/app/model-cache"
@@ -14,7 +18,13 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
 
 volumes:
   stt_whisper_cache:

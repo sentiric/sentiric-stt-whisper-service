@@ -1,14 +1,37 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v17.0
-#    PROTOBUF 6.33.0 - SENTIRIC-CONTRACTS İLE UYUMLU
+#    SENTIRIC STT-WHISPER-SERVICE - OPTIMIZED PRODUCTION v18.0
+#    MULTI-STAGE BUILD + SIZE OPTIMIZATION
 # =================================================================
-ARG STT_WHISPER_BASE_IMAGE=python:3.11-slim-bookworm
+ARG PYTHON_VERSION=3.11-slim-bookworm
 
-FROM ${STT_WHISPER_BASE_IMAGE} AS production
+# Build stage for dependencies
+FROM python:${PYTHON_VERSION} AS builder
 
 WORKDIR /app
 
-# Build arg'lar
+# Build arguments
+ARG GIT_COMMIT="unknown"
+ARG BUILD_DATE="unknown" 
+ARG SERVICE_VERSION="0.0.0"
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Runtime stage
+FROM python:${PYTHON_VERSION} AS production
+
+WORKDIR /app
+
+# Build arguments
 ARG GIT_COMMIT="unknown"
 ARG BUILD_DATE="unknown" 
 ARG SERVICE_VERSION="0.0.0"
@@ -27,27 +50,19 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     HF_HOME=/app/model-cache \
     HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
     STT_WHISPER_SERVICE_DEVICE=auto \
-    STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=600
+    STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=600 \
+    PATH=/app/.local/bin:$PATH
 
-# Runtime dependencies
+# Runtime dependencies (minimal)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     curl \
-    git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Python ve pip upgrade
-RUN pip install --no-cache-dir --upgrade pip
-
-# ✅ MEVCUT: requirements.txt AKTİF kullan
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 📚 GELECEK: pyproject.toml REFERANS olarak tut
-# COPY pyproject.toml .
-# RUN pip install --no-cache-dir .
+# Copy installed packages from builder
+COPY --from=builder /root/.local /app/.local
 
 # App user
 RUN addgroup --system --gid 1001 appgroup \
@@ -62,7 +77,7 @@ RUN mkdir -p /app/model-cache /tmp/numba_cache \
 
 USER appuser
 
-# Healthcheck
+# Healthcheck with retry logic
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${STT_WHISPER_SERVICE_HTTP_PORT:-15030}/health || exit 1
 
