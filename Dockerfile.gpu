@@ -1,8 +1,8 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - PRODUCTION DOCKERFILE v17.0
-#    PROTOBUF 6.33.0 - SENTIRIC-CONTRACTS İLE UYUMLU
+#    SENTIRIC STT-WHISPER-SERVICE - GPU DOCKERFILE v20.0
+#    FASTER-WHISPER RESMİ DOCKERFILE - CUDA 12.3.2 + cuDNN 9
 # =================================================================
-ARG STT_WHISPER_BASE_IMAGE=python:3.11-slim-bookworm
+ARG STT_WHISPER_BASE_IMAGE=nvidia/cuda:12.3.2-cudnn9-runtime-ubuntu22.04
 
 FROM ${STT_WHISPER_BASE_IMAGE} AS production
 
@@ -13,24 +13,28 @@ ARG GIT_COMMIT="unknown"
 ARG BUILD_DATE="unknown" 
 ARG SERVICE_VERSION="0.0.0"
 
-# Environment variables
+# Environment variables - GPU DESTEKLİ
 ENV GIT_COMMIT=${GIT_COMMIT} \
     BUILD_DATE=${BUILD_DATE} \
     SERVICE_VERSION=${SERVICE_VERSION} \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    NUMBA_DEBUG=0 \
+    NUMBA_CACHE_DIR=/tmp/numba_cache \
     NUMBA_DISABLE_JIT=0 \
-    NUMBA_CACHE_DIR=/tmp \
     LIBROSA_CACHE_LEVEL=0 \
     PYTHONWARNINGS=ignore \
     HF_HOME=/app/model-cache \
     HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
-    STT_WHISPER_SERVICE_DEVICE=auto \
-    STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=600
+    STT_WHISPER_SERVICE_DEVICE=cuda \
+    STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=600 \
+    STT_WHISPER_SERVICE_COMPUTE_TYPE=float16 
 
-# Runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Runtime dependencies - FASTER-WHISPER RESMİ KURULUMU
+RUN apt-get update -y && apt-get install -y \
+    python3-pip \
+    python3.10 \
+    python3.10-dev \
+    python3.10-venv \
     ffmpeg \
     libsndfile1 \
     curl \
@@ -38,16 +42,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Python ve pip upgrade
-RUN pip install --no-cache-dir --upgrade pip
+# Python 3.10'ı default yap
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 
-# ✅ MEVCUT: requirements.txt AKTİF kullan
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# pip upgrade
+RUN pip3 install --no-cache-dir --upgrade pip
 
-# 📚 GELECEK: pyproject.toml REFERANS olarak tut
-# COPY pyproject.toml .
-# RUN pip install --no-cache-dir .
+# Python paketlerini kur - TORCH CUDA 12.3!
+COPY requirements.gpu.txt .
+RUN pip3 install --no-cache-dir -r requirements.gpu.txt
 
 # App user
 RUN addgroup --system --gid 1001 appgroup \
@@ -58,12 +62,13 @@ COPY --chown=appuser:appgroup ./app ./app
 
 # Create cache directories
 RUN mkdir -p /app/model-cache /tmp/numba_cache \
-    && chown -R appuser:appgroup /app /tmp/numba_cache
+    && chown -R appuser:appgroup /app /tmp/numba_cache \
+    && chmod 777 /tmp/numba_cache
 
 USER appuser
 
 # Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${STT_WHISPER_SERVICE_HTTP_PORT:-15030}/health || exit 1
 
 EXPOSE 15030 15031 15032

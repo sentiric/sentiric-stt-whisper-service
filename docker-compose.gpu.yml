@@ -1,0 +1,29 @@
+services:
+  stt-whisper-service:
+    build: 
+      context: ../sentiric-stt-whisper-service
+      dockerfile: Dockerfile.gpu  # ✅ GPU DOCKERFILE
+    environment:
+      - STT_WHISPER_SERVICE_DEVICE=cuda  # ✅ GPU FORCE
+      - STT_WHISPER_SERVICE_COMPUTE_TYPE=float16
+    volumes: 
+      - "../sentiric-certificates:/sentiric-certificates:ro"
+      - "stt_whisper_cache:/app/model-cache"
+    ports: 
+      - "15030:15030"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:15030/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s  # ✅ GPU model yükleme daha uzun
+
+volumes:
+  stt_whisper_cache:
