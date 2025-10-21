@@ -1,10 +1,11 @@
-# === SENTIRIC STT SERVICE - OPTIMIZED ===
+# === SENTIRIC STT SERVICE - COMPLETE ===
 # Core Framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 
-# STT Engine (SADECE faster-whisper - openai-whisper GEREKSİZ)
+# STT Engine  
 faster-whisper==1.0.2
+torch==2.3.0  # ✅ TORCH EKLENDİ!
 
 # Audio Processing
 librosa==0.10.1

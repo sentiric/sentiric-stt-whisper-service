@@ -41,14 +41,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Python ve pip upgrade
 RUN pip install --no-cache-dir --upgrade pip
 
-# ✅ YERİNE BUNU KOY veya TAMAMEN SİL:
-# Protobuf zaten requirements.txt'den geliyor
-
-# Python paketlerini direkt pip ile kur
+# ✅ MEVCUT: requirements.txt AKTİF kullan
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ❌ :
+# 📚 GELECEK: pyproject.toml REFERANS olarak tut
 # COPY pyproject.toml .
 # RUN pip install --no-cache-dir .
 

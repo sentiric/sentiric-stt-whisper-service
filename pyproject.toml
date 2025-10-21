@@ -9,32 +9,34 @@ license = {text = "Apache-2.0"}
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    # Core Framework (FASTAPI STACK - UYUMLU VERSİYONLAR)
-    "fastapi==0.104.1",                    # ✅ 0.111.0 -> 0.104.1
-    "uvicorn[standard]==0.24.0",           # ✅ 0.29.0 -> 0.24.0
+    # Core Framework
+    "fastapi==0.104.1",
+    "uvicorn[standard]==0.24.0",
     
-    # Configuration & Validation
-    "pydantic==2.12.3",                    # ✅ 2.7.3 -> 2.12.3
-    "pydantic-settings==2.4.0",            # ✅ 2.3.4 -> 2.4.0
+    # STT Engine - TORCH EKLENDİ! 🚨
+    "faster-whisper==1.0.2",
+    "torch==2.3.0",  # ✅ KRİTİK EKSİK!
     
-    # STT Engine
-    "faster-whisper==1.0.2",               # ✅ 1.0.3 -> 1.0.2 (stabil)
-    
-    # Audio Processing
+    # Audio Processing - PYDUB EKLENDİ! 🚨
     "soundfile==0.12.1",
     "librosa==0.10.1", 
     "numpy==1.26.4",
-    "python-multipart==0.0.6",             # ✅ 0.0.9 -> 0.0.6
+    "python-multipart==0.0.6",
+    "pydub==0.25.1",  # ✅ KRİTİK EKSİK!
     
-    # Monitoring & Logging
-    "structlog==23.3.0",                   # ✅ 24.1.0 -> 23.3.0
+    # Configuration & Logging
+    "pydantic==2.12.3",
+    "pydantic-settings==2.4.0",
+    "structlog==23.3.0",
+    
+    # Monitoring
     "prometheus-client==0.20.0",
-    "prometheus-fastapi-instrumentator==6.0.0",  # ✅ 7.0.0 -> 6.0.0 (fastapi uyumlu)
+    "prometheus-fastapi-instrumentator==6.0.0",
     
     # gRPC & Contracts
-    "grpcio>=1.62.0",                      # ✅ YENİ EKLENDİ
-    "protobuf>=5.26.1,<7.0.0",             # ✅ YENİ EKLENDİ
-    "sentiric-contracts-py @ git+https://github.com/sentiric/sentiric-contracts.git@v1.9.3",  # ✅ v1.9.2 -> v1.9.3
+    "grpcio>=1.62.0",
+    "protobuf>=5.26.1,<7.0.0",
+    "sentiric-contracts-py @ git+https://github.com/sentiric/sentiric-contracts.git@v1.9.3",
     
     # System & Utilities
     "aiofiles==23.2.1",
@@ -43,9 +45,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest==7.4.4",                       # ✅ 8.2.2 -> 7.4.4
-    "black==23.12.1",                       # ✅ YENİ EKLENDİ
-    "flake8==7.0.0",                        # ✅ YENİ EKLENDİ
+    "pytest==7.4.4",
+    "black==23.12.1", 
+    "flake8==7.0.0",
 ]
 
 [build-system]
