@@ -68,8 +68,9 @@ def setup_logging():
     if env == "development":
         processors = shared_processors + [structlog.dev.ConsoleRenderer(colors=True)]
     else: # production veya diğer
-        processors = shared_providers + [structlog.processors.JSONRenderer()]
-    
+        # DÜZELTİLEN SATIR:
+        processors = shared_processors + [structlog.processors.JSONRenderer()]
+        
     structlog.configure(
         processors=processors,
         logger_factory=structlog.stdlib.LoggerFactory(),
