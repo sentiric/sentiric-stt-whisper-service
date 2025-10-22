@@ -1,10 +1,26 @@
 # =================================================================
 #    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED v20.0
-#    CUDA 12.1 + cuDNN 8.9.1 UYUMLU
+#    CUDA 12.4 + cuDNN 9 + PROTOBUF FIX
 # =================================================================
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS production
+FROM nvidia/cuda:12.4.1-cudnn9-runtime-ubuntu22.04 AS production
 
 WORKDIR /app
+
+# Python 3.11 kurulumu (CUDA image'de yok)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-pip \
+    python3.11-venv \
+    python3.11-dev \
+    ffmpeg \
+    libsndfile1 \
+    curl \
+    git \
+    build-essential \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Build arguments
 ARG GIT_COMMIT="unknown"
@@ -23,39 +39,33 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     HF_HOME=/app/model-cache \
     STT_WHISPER_SERVICE_DEVICE=cuda \
     STT_WHISPER_SERVICE_COMPUTE_TYPE=float16 \
-    STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=600 \
-    CUDA_VISIBLE_DEVICES=0 \   
-    CUDNN_PATH=/usr/lib/x86_64-linux-gnu \
-    LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+    STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=300 \
+    CUDA_LAUNCH_BLOCKING=1 \
+    CUBLAS_WORKSPACE_CONFIG=:4096:8
 
-# Single layer for all system dependencies - CUDA uyumlu
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
-    ffmpeg \
-    libsndfile1 \
-    curl \
-    git \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
-    && ln -sf /usr/bin/python3 /usr/bin/python \
-    && pip3 install --no-cache-dir --upgrade pip
+# Pip upgrade ve torch kurulumu (CUDA 12.4 için)
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir \
+    torch==2.5.0+cu124 --index-url https://download.pytorch.org/whl/cu124
 
-# Copy requirements and install in single layer
+# Copy requirements ve diğer bağımlılıkları kur
 COPY requirements.gpu.txt .
 RUN pip install --no-cache-dir -r requirements.gpu.txt
 
-# Create app user
+# App user oluştur
 RUN groupadd --system --gid 1001 appgroup \
     && useradd --system --no-create-home --uid 1001 --gid appgroup appuser
 
-# Copy app code
+# App kodunu kopyala
 COPY --chown=appuser:appgroup ./app ./app
 
-# Create cache directories and verify CUDA libraries
+# Cache dizinlerini oluştur
 RUN mkdir -p /app/model-cache /tmp/numba_cache \
-    && chown -R appuser:appgroup /app /tmp/numba_cache \
-    && ldconfig
+    && chown -R appuser:appgroup /app /tmp/numba_cache
+
+# CUDA ve cuDNN library path'leri
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}
+ENV CUDA_HOME=/usr/local/cuda
 
 USER appuser
 
@@ -63,6 +73,6 @@ USER appuser
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:15030/health || exit 1
 
-EXPOSE 15030 15031 15032
+EXPOSE 15030
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15030", "--no-access-log"]

@@ -16,8 +16,7 @@ dependencies = [
     
     # STT Engine - CUDA FIXED
     "faster-whisper==1.0.2",
-    "torch==2.3.0",
-    "torch==2.3.0",
+    "torch==2.5.0",
     
     # Audio Processing
     "soundfile==0.12.1",
@@ -46,6 +45,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gpu = [
+    "torch>=2.3.0",
+]
+
 dev = [
     "pytest==7.4.4",
     "pytest-asyncio==0.23.5",
