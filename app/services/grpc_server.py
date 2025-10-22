@@ -1,3 +1,32 @@
+# =====================================================================
+# MONKEY PATCH FOR PROTOBUF v4+ COMPATIBILITY v2
+# The generated contract expects 'google.protobuf.runtime_version.Domain'.
+# This object was part of the internal API in older protobuf versions.
+# We simulate this object and its 'PUBLIC' attribute to satisfy the import.
+import google.protobuf
+if not hasattr(google.protobuf, 'runtime_version'):
+    from types import ModuleType, SimpleNamespace
+    
+    # Sahte 'Domain' nesnesini oluştur
+    domain = SimpleNamespace()
+    domain.PUBLIC = 0  # Genellikle 0 veya 1 gibi bir enum değeridir
+    
+    # Sahte 'runtime_version' modülünü oluştur
+    runtime_version_module = ModuleType('google.protobuf.runtime_version')
+    
+    # Sahte modülün içine sahte 'Domain' nesnesini ekle
+    setattr(runtime_version_module, 'Domain', domain)
+    
+    # Eski Validate fonksiyonunu da ekle (boş olsa da)
+    def ValidateProtobufRuntimeVersion(*args, **kwargs):
+        pass
+    runtime_version_module.ValidateProtobufRuntimeVersion = ValidateProtobufRuntimeVersion
+    
+    # Ana protobuf modülüne sahte modülü bağla
+    google.protobuf.runtime_version = runtime_version_module
+# END OF MONKEY PATCH
+# =====================================================================
+
 import structlog
 import numpy as np
 import librosa

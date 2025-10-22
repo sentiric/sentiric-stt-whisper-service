@@ -22,7 +22,7 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     HF_HOME=/app/model-cache \
     STT_WHISPER_SERVICE_DEVICE=cpu \
     STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=300
-
+    
 # YENİ EKLENEN SATIRLAR: İnteraktif prompt'ları engelle
 ENV TZ=Etc/UTC
 ENV DEBIAN_FRONTEND=noninteractive

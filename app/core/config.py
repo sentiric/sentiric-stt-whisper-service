@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     # Project Metadata
     PROJECT_NAME: str = "Sentiric STT Whisper Service"
     API_V1_STR: str = "/api/v1"
-    ENV: str = "production"
+    ENV: str = "development"
     LOG_LEVEL: str = "INFO"
 
     # Build Information

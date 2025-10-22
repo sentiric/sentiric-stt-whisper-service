@@ -5,8 +5,12 @@ uvicorn[standard]==0.24.0
 httpx==0.27.0
 
 # STT Engine - CUDA 12.1 uyumlu
-faster-whisper==1.0.2
 torch==2.3.0
+torchvision==0.18.0
+torchaudio==2.3.0
+# cuDNN uyumsuzluğunu gidermek için CTranslate2 ve faster-whisper'ı da güncelliyoruz
+ctranslate2==4.3.1
+faster-whisper==1.0.3
 
 # Audio Processing
 librosa==0.10.1
@@ -26,7 +30,7 @@ prometheus-fastapi-instrumentator==6.0.0
 
 # gRPC & Contracts - PROTOBUF FIX
 grpcio>=1.62.0
-protobuf==5.29.5 # SABİTLENDİ
+protobuf==4.25.3
 sentiric-contracts-py@git+https://github.com/sentiric/sentiric-contracts.git@v1.9.3
 
 # System & Utilities
