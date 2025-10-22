@@ -1,12 +1,17 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED (MULTI-STAGE) v4 - FINAL
+#    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED (MULTI-STAGE) v5 - FINAL
 # =================================================================
 
 # --- STAGE 1: Builder ---
 FROM python:3.11-slim-bookworm AS builder
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+
+# DÜZELTME: 'git' paketi build-essential ile birlikte buraya eklendi.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY requirements.gpu.txt .
@@ -34,6 +39,8 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
 
 WORKDIR /app
 
+# NOT: 'git' paketi burada gerekli DEĞİL, çünkü sadece build aşamasında kullanıldı.
+# Bu, son imaj boyutunu küçük tutar.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     && add-apt-repository ppa:deadsnakes/ppa -y && apt-get update \
