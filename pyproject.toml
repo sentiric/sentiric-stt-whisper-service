@@ -36,7 +36,7 @@ dependencies = [
     
     # gRPC & Contracts - PROTOBUF RANGE FIXED
     "grpcio>=1.62.0",
-    "protobuf>=5.26.1,<6.30.0",
+    "protobuf==5.29.5", # SABİTLENDİ
     "sentiric-contracts-py @ git+https://github.com/sentiric/sentiric-contracts.git@v1.9.3",
     
     # System & Utilities

@@ -1,78 +1,82 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED v20.0
-#    CUDA 12.3 + cuDNN 8 + PROTOBUF FIX
+#    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED (MULTI-STAGE) v2
 # =================================================================
-FROM nvidia/cuda:12.3.1-devel-ubuntu22.04 AS production
+
+# --- STAGE 1: Builder ---
+# Bu aşama, bağımlılıkları güvenli bir ortamda kurmak için kullanılır.
+FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /app
 
-# Python 3.11 kurulumu
+# Sistem bağımlılıklarını kur (build için gerekli olanlar + GIT EKLENDİ)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
-    python3.11-pip \
-    python3.11-venv \
-    python3.11-dev \
-    ffmpeg \
-    libsndfile1 \
-    curl \
-    git \
     build-essential \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    git \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Build arguments
+# Sanal ortam oluşturarak sistem Python'unu kirletmeyi önle
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Bağımlılıkları kur
+COPY requirements.gpu.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.gpu.txt
+
+# --- STAGE 2: Final Production Image ---
+# Minimal bir RUNTIME imajı kullanıyoruz.
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
 ARG GIT_COMMIT="unknown"
-ARG BUILD_DATE="unknown" 
+ARG BUILD_DATE="unknown"
 ARG SERVICE_VERSION="0.0.0"
 
-# Environment variables
 ENV GIT_COMMIT=${GIT_COMMIT} \
     BUILD_DATE=${BUILD_DATE} \
     SERVICE_VERSION=${SERVICE_VERSION} \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    NUMBA_CACHE_DIR=/tmp \
-    LIBROSA_CACHE_LEVEL=0 \
-    PYTHONWARNINGS=ignore \
+    PATH="/opt/venv/bin:$PATH" \
     HF_HOME=/app/model-cache \
-    STT_WHISPER_SERVICE_DEVICE=cuda \
-    STT_WHISPER_SERVICE_COMPUTE_TYPE=float16 \
-    STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=300 \
-    CUDA_LAUNCH_BLOCKING=1 \
-    CUBLAS_WORKSPACE_CONFIG=:4096:8
+    ENV=production \
+    LOG_LEVEL=INFO
 
-# Pip upgrade ve torch kurulumu (CUDA 12.3 için)
-RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir \
-    torch==2.3.0+cu123 --index-url https://download.pytorch.org/whl/cu123
+WORKDIR /app
 
-# Copy requirements ve diğer bağımlılıkları kur
-COPY requirements.gpu.txt .
-RUN pip install --no-cache-dir -r requirements.gpu.txt
+# RUNTIME için gerekli sistem bağımlılıklarını kur
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa -y && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    ffmpeg \
+    libsndfile1 \
+    curl \
+    git \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# App user oluştur
-RUN groupadd --system --gid 1001 appgroup \
-    && useradd --system --no-create-home --uid 1001 --gid appgroup appuser
+# Builder aşamasında oluşturulan sanal ortamı kopyala
+COPY --from=builder /opt/venv /opt/venv
 
-# App kodunu kopyala
+# Uygulama kullanıcısı
+RUN addgroup --system --gid 1001 appgroup && \
+    adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
+
+# Uygulama kodu
 COPY --chown=appuser:appgroup ./app ./app
 
-# Cache dizinlerini oluştur
+# Cache dizinleri
 RUN mkdir -p /app/model-cache /tmp/numba_cache \
     && chown -R appuser:appgroup /app /tmp/numba_cache
 
-# CUDA ve cuDNN library path'leri
-ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}
-ENV CUDA_HOME=/usr/local/cuda
-
 USER appuser
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:15030/health || exit 1
 
-EXPOSE 15030
+EXPOSE 15030 15031
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15030", "--no-access-log"]

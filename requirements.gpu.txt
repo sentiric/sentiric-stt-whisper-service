@@ -1,11 +1,13 @@
-# === SENTIRIC STT SERVICE - GPU OPTIMIZED (CUDA 12.3) ===
+# === SENTIRIC STT SERVICE - GPU OPTIMIZED (CUDA 12.1) ===
 # Core Framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 httpx==0.27.0
 
-# STT Engine
+# STT Engine - CUDA 12.1 uyumlu
 faster-whisper==1.0.2
+# torch, Dockerfile içinde --extra-index-url ile kurulacak. Bu satır sadece referans içindir.
+# torch==2.3.0+cu121
 
 # Audio Processing
 librosa==0.10.1
@@ -25,7 +27,7 @@ prometheus-fastapi-instrumentator==6.0.0
 
 # gRPC & Contracts - PROTOBUF FIX
 grpcio>=1.62.0
-protobuf==5.29.5
+protobuf==5.29.5 # SABİTLENDİ
 sentiric-contracts-py@git+https://github.com/sentiric/sentiric-contracts.git@v1.9.3
 
 # System & Utilities
