@@ -1,12 +1,12 @@
 # =================================================================
 #    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED v20.0
-#    CUDA 12.4 + cuDNN 9 + PROTOBUF FIX
+#    CUDA 12.3 + cuDNN 8 + PROTOBUF FIX
 # =================================================================
-FROM nvidia/cuda:12.4.1-cudnn9-runtime-ubuntu22.04 AS production
+FROM nvidia/cuda:12.3.1-devel-ubuntu22.04 AS production
 
 WORKDIR /app
 
-# Python 3.11 kurulumu (CUDA image'de yok)
+# Python 3.11 kurulumu
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-pip \
@@ -43,10 +43,10 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     CUDA_LAUNCH_BLOCKING=1 \
     CUBLAS_WORKSPACE_CONFIG=:4096:8
 
-# Pip upgrade ve torch kurulumu (CUDA 12.4 için)
+# Pip upgrade ve torch kurulumu (CUDA 12.3 için)
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir \
-    torch==2.5.0+cu124 --index-url https://download.pytorch.org/whl/cu124
+    torch==2.3.0+cu123 --index-url https://download.pytorch.org/whl/cu123
 
 # Copy requirements ve diğer bağımlılıkları kur
 COPY requirements.gpu.txt .

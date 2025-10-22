@@ -1,4 +1,4 @@
-# === SENTIRIC STT SERVICE - GPU OPTIMIZED (CUDA 12.4) ===
+# === SENTIRIC STT SERVICE - GPU OPTIMIZED (CUDA 12.3) ===
 # Core Framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
