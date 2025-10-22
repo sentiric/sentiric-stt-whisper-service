@@ -16,8 +16,8 @@ dependencies = [
     
     # STT Engine - CUDA FIXED
     "faster-whisper==1.0.2",
-    "torch==2.3.0+cu121; sys_platform == 'linux'",
-    "torch==2.3.0; sys_platform != 'linux'",
+    "torch==2.3.0",
+    "torch==2.3.0",
     
     # Audio Processing
     "soundfile==0.12.1",
