@@ -1,30 +1,21 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED (MULTI-STAGE) v2
+#    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED (MULTI-STAGE) v3
 # =================================================================
 
 # --- STAGE 1: Builder ---
-# Bu aşama, bağımlılıkları güvenli bir ortamda kurmak için kullanılır.
 FROM python:3.11-slim-bookworm AS builder
-
 WORKDIR /app
-
-# Sistem bağımlılıklarını kur (build için gerekli olanlar + GIT EKLENDİ)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Sanal ortam oluşturarak sistem Python'unu kirletmeyi önle
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-
-# Bağımlılıkları kur
 COPY requirements.gpu.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.gpu.txt
 
 # --- STAGE 2: Final Production Image ---
-# Minimal bir RUNTIME imajı kullanıyoruz.
 FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 ARG GIT_COMMIT="unknown"
@@ -43,6 +34,10 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
 
 WORKDIR /app
 
+# YENİ EKLENEN SATIRLAR: İnteraktif prompt'ları engelle
+ENV TZ=Etc/UTC
+ENV DEBIAN_FRONTEND=noninteractive
+
 # RUNTIME için gerekli sistem bağımlılıklarını kur
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
@@ -58,25 +53,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Builder aşamasında oluşturulan sanal ortamı kopyala
+# ... dosyanın geri kalanı aynı ...
 COPY --from=builder /opt/venv /opt/venv
-
-# Uygulama kullanıcısı
 RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
-
-# Uygulama kodu
 COPY --chown=appuser:appgroup ./app ./app
-
-# Cache dizinleri
 RUN mkdir -p /app/model-cache /tmp/numba_cache \
     && chown -R appuser:appgroup /app /tmp/numba_cache
-
 USER appuser
-
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:15030/health || exit 1
-
 EXPOSE 15030 15031
-
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15030", "--no-access-log"]

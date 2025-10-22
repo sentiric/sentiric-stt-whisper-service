@@ -1,5 +1,5 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - CPU OPTIMIZED v20.0
+#    SENTIRIC STT-WHISPER-SERVICE - CPU OPTIMIZED v21.0
 # =================================================================
 FROM python:3.11-slim-bookworm AS production
 
@@ -23,6 +23,10 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     STT_WHISPER_SERVICE_DEVICE=cpu \
     STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=300
 
+# YENİ EKLENEN SATIRLAR: İnteraktif prompt'ları engelle
+ENV TZ=Etc/UTC
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Sistem bağımlılıklarını tek katmanda kur ve temizle
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
@@ -32,29 +36,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Pip'i yükselt ve bağımlılıkları tek katmanda kur
+# ... dosyanın geri kalanı aynı ...
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
-
-# Uygulama kullanıcısını oluştur
 RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
-
-# Uygulama kodunu kopyala
 COPY --chown=appuser:appgroup ./app ./app
-
-# Cache dizinlerini oluştur ve yetkilendir
 RUN mkdir -p /app/model-cache /tmp/numba_cache \
     && chown -R appuser:appgroup /app /tmp/numba_cache
-
 USER appuser
-
-# Healthcheck ve portlar
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:15030/health || exit 1
-
-EXPOSE 15030
-EXPOSE 15031
-
+EXPOSE 15030 15031
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15030", "--no-access-log"]
