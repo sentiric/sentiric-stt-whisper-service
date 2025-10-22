@@ -1,6 +1,6 @@
 services:
   stt-whisper-service:
-    image: ghcr.io/sentiric/sentiric-stt-whisper-service:gpu
+    image: ghcr.io/sentiric/sentiric-stt-whisper-service:gpu-latest
     build: 
       context: .
       dockerfile: Dockerfile.gpu

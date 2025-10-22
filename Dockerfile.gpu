@@ -1,8 +1,8 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - GPU MINIMAL v19.0
-#    CUDA 12.1 + SINGLE STAGE BUILD
+#    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED v20.0
+#    CUDA 12.1 + cuDNN 8.9.1 UYUMLU
 # =================================================================
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04 AS production
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS production
 
 WORKDIR /app
 
@@ -24,23 +24,26 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     STT_WHISPER_SERVICE_DEVICE=cuda \
     STT_WHISPER_SERVICE_COMPUTE_TYPE=float16 \
     STT_WHISPER_SERVICE_MODEL_LOAD_TIMEOUT=600 \
-    CUDA_VISIBLE_DEVICES=0
+    CUDA_VISIBLE_DEVICES=0 \   
+    CUDNN_PATH=/usr/lib/x86_64-linux-gnu \
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
-# Single layer for all dependencies
+# Single layer for all system dependencies - CUDA uyumlu
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     ffmpeg \
     libsndfile1 \
     curl \
+    git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && pip3 install --no-cache-dir --upgrade pip
 
-# Copy requirements and install
-COPY requirements-simple.txt .
-RUN pip3 install --no-cache-dir -r requirements-simple.txt
+# Copy requirements and install in single layer
+COPY requirements.gpu.txt .
+RUN pip install --no-cache-dir -r requirements.gpu.txt
 
 # Create app user
 RUN groupadd --system --gid 1001 appgroup \
@@ -49,16 +52,17 @@ RUN groupadd --system --gid 1001 appgroup \
 # Copy app code
 COPY --chown=appuser:appgroup ./app ./app
 
-# Create cache directories
+# Create cache directories and verify CUDA libraries
 RUN mkdir -p /app/model-cache /tmp/numba_cache \
-    && chown -R appuser:appgroup /app /tmp/numba_cache
+    && chown -R appuser:appgroup /app /tmp/numba_cache \
+    && ldconfig
 
 USER appuser
 
 # Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:15030/health || exit 1
 
-EXPOSE 15030
+EXPOSE 15030 15031 15032
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15030", "--no-access-log"]

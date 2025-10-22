@@ -1,12 +1,12 @@
-# === SENTIRIC STT SERVICE - COMPLETE ===
+# === SENTIRIC STT SERVICE - CUDA FIXED ===
 # Core Framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 httpx==0.27.0
 
-# STT Engine  
+# STT Engine - CUDA 12.1 uyumlu
 faster-whisper==1.0.2
-torch==2.3.0
+torch==2.3.0+cu121 --index-url https://download.pytorch.org/whl/cu121
 
 # Audio Processing
 librosa==0.10.1
@@ -24,14 +24,11 @@ structlog==23.3.0
 prometheus-client==0.20.0
 prometheus-fastapi-instrumentator==6.0.0
 
-# gRPC & Contracts
+# gRPC & Contracts - PROTOBUF FIX
 grpcio>=1.62.0
-protobuf>=5.26.1,<7.0.0
+protobuf>=5.26.1,<6.30.0
 sentiric-contracts-py@git+https://github.com/sentiric/sentiric-contracts.git@v1.9.3
 
-# Development
-pytest==7.4.4
-pytest-asyncio==0.23.5
-pytest-cov==4.1.0
-black==23.12.1
-flake8==7.0.0
+# System & Utilities
+aiofiles==23.2.1
+psutil==5.9.8

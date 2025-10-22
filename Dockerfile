@@ -29,13 +29,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     curl \
+    git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && pip install --no-cache-dir --upgrade pip
 
 # Copy requirements and install in single layer
-COPY requirements-simple.txt .
-RUN pip install --no-cache-dir -r requirements-simple.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Create app user
 RUN addgroup --system --gid 1001 appgroup \

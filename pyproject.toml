@@ -12,11 +12,12 @@ dependencies = [
     # Core Framework
     "fastapi==0.104.1",
     "uvicorn[standard]==0.24.0",
-    "httpx==0.27.0",  # ✅ HTTPX EKLENDİ!
+    "httpx==0.27.0",
     
-    # STT Engine
+    # STT Engine - CUDA FIXED
     "faster-whisper==1.0.2",
-    "torch==2.3.0",
+    "torch==2.3.0+cu121; sys_platform == 'linux'",
+    "torch==2.3.0; sys_platform != 'linux'",
     
     # Audio Processing
     "soundfile==0.12.1",
@@ -34,9 +35,9 @@ dependencies = [
     "prometheus-client==0.20.0",
     "prometheus-fastapi-instrumentator==6.0.0",
     
-    # gRPC & Contracts
+    # gRPC & Contracts - PROTOBUF RANGE FIXED
     "grpcio>=1.62.0",
-    "protobuf>=5.26.1,<7.0.0",
+    "protobuf>=5.26.1,<6.30.0",
     "sentiric-contracts-py @ git+https://github.com/sentiric/sentiric-contracts.git@v1.9.3",
     
     # System & Utilities
