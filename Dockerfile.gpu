@@ -1,24 +1,20 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED (MULTI-STAGE) v7 - FINAL
+#    SENTIRIC STT-WHISPER-SERVICE - GPU OPTIMIZED (MULTI-STAGE & SIZE-OPTIMIZED) v8
 # =================================================================
 
 # --- STAGE 1: Builder ---
-# Bu aşama, Python paketlerini indirip bir önbellek (wheelhouse) oluşturmak için kullanılır.
+# Bu aşama değişmiyor, görevini mükemmel yapıyor.
 FROM python:3.11-slim-bookworm AS builder
-
 WORKDIR /wheelhouse
-
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
 COPY requirements.gpu.txt .
-
-# Bağımlılıkları tekerlek (wheel) formatında indir.
 RUN pip wheel --no-cache-dir -r requirements.gpu.txt
 
 # --- STAGE 2: Final Production Image ---
 FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
+# ENV'ler ve ARG'lar aynı kalıyor
 ARG GIT_COMMIT="unknown"
 ARG BUILD_DATE="unknown"
 ARG SERVICE_VERSION="0.0.0"
@@ -35,7 +31,7 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
 
 WORKDIR /app
 
-# Gerekli sistem bağımlılıklarını ve Python 3.11'i kur
+# Gerekli sistem bağımlılıklarını ve Python'u kur
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     && add-apt-repository ppa:deadsnakes/ppa -y && apt-get update \
@@ -46,18 +42,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     curl \
     && ln -sf /usr/bin/python3.11 /usr/bin/python \
+    # OPTIMIZATION 1: APT cache'ini temizle
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Sanal ortamı bu aşamada oluşturuyoruz.
+# Sanal ortamı oluştur
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Builder aşamasında indirilen wheel dosyalarını kopyala
+# Builder'dan wheel'leri kopyala
 COPY --from=builder /wheelhouse /wheelhouse
 
-# DÜZELTME BURADA: Sadece .whl uzantılı dosyaları kur
-RUN pip install --no-cache-dir /wheelhouse/*.whl
+# Bağımlılıkları kur VE HEMEN ARDINDAN GEREKSIZ DOSYALARI TEMIZLE
+RUN pip install --no-cache-dir /wheelhouse/*.whl \
+    # OPTIMIZATION 2: Wheelhouse'ı (indirilen paketleri) kurulumdan sonra sil
+    && rm -rf /wheelhouse \
+    # OPTIMIZATION 3: pip'in kendi cache'ini temizle
+    && rm -rf /root/.cache/pip \
+    # OPTIMIZATION 4: Derlenmiş Python dosyalarını ve testleri bulup sil
+    && find /opt/venv -type f -name '*.pyc' -delete \
+    && find /opt/venv -type d -name '__pycache__' -delete \
+    && find /opt/venv -type d -name 'tests' -delete
 
 # Uygulama kullanıcısı ve kod
 RUN addgroup --system --gid 1001 appgroup && \
