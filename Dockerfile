@@ -12,7 +12,6 @@ RUN pip wheel --no-cache-dir -r requirements.txt
 
 # --- STAGE 2: Final Production Image ---
 FROM python:3.11-slim-bookworm
-# ... (ARG ve ENV'ler aynı)
 ARG GIT_COMMIT="unknown"
 ARG BUILD_DATE="unknown"
 ARG SERVICE_VERSION="0.0.0"
@@ -35,18 +34,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY --from=builder /wheelhouse /wheelhouse
-
-# --- DÜZELTİLEN KISIM BURASI ---
 RUN pip install --no-cache-dir /wheelhouse/*.whl \
     && rm -rf /wheelhouse \
     && rm -rf /root/.cache/pip \
-    # Daha sağlam silme komutları:
     && find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + \
     && find /opt/venv -type f -name "*.pyc" -delete \
     && find /opt/venv -type d -name "tests" -exec rm -rf {} + \
     && find /opt/venv -type d -name "test" -exec rm -rf {} +
-
-# ... (dosyanın geri kalanı aynı)
 RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
 COPY --chown=appuser:appgroup ./app ./app
@@ -55,5 +49,5 @@ RUN mkdir -p /app/model-cache /tmp/numba_cache \
 USER appuser
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:15030/health || exit 1
-EXPOSE 15030 15031 15032
+EXPOSE 15030 15031
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15030", "--no-access-log"]

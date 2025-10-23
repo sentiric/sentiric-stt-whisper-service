@@ -33,3 +33,12 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository }}:gpu-latest
           no-cache: true
+
+      - name: Clean up Docker resources # TEMİZLİK ADIMI
+        if: always()
+        run: |
+          echo "==> Cleaning up Docker build cache and images..."
+          docker builder prune -af
+          docker image prune -af
+          echo "==> Displaying final disk space..."
+          df -h
