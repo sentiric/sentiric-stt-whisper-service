@@ -32,8 +32,8 @@ def run_transcribe_test(server_address, audio_file_path, language_code=None):
             
             print("\n✅ BAŞARILI GRPC YANITI:")
             print(f"  Metin: '{response.transcription}'")
-            print(f"  Dil: {response.language} (Olasılık: {response.language_probability:.4f})")
-            print(f"  Süre: {response.duration:.2f}s")
+            # print(f"  Dil: {response.language} (Olasılık: {response.language_probability:.4f})")
+            # print(f"  Süre: {response.duration:.2f}s")
 
         except grpc.RpcError as e:
             print(f"\n❌ GRPC HATA ALINDI:")

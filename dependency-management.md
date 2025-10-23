@@ -15,7 +15,7 @@ Bu iki temel bileşenin değiştirilmesi, tüm bağımlılık zincirinin yeniden
 
 ---
 
-## 2. Onaylanmış ve Çalışan Bağımlılık Listesi (`requirements.gpu.txt` - 2025-10-22)
+## 2. Onaylanmış ve Çalışan Bağımlılık Listesi (`requirements.gpu.txt` - 2025-10-23)
 
 Aşağıdaki liste, projenin hem REST hem de gRPC arayüzleriyle stabil çalıştığı **kanıtlanmış** versiyonları içerir.
 
@@ -49,23 +49,22 @@ sentiric-contracts-py@git+https://github.com/sentiric/sentiric-contracts.git@v1.
 ## 3. Karşılaşılan Kritik Sorunlar ve Çözümleri
 
 ### a. Sorun: `libcudnn_ops.so` Bulunamadı / `Empty reply from server`
-*   **Neden:** `torch` versiyonunun, Docker imajındaki `cuDNN 8` yerine `cuDNN 9` beklemesi.
-*   **Çözüm:** `faster-whisper` ve `ctranslate2` kütüphaneleri, `cuDNN 8` ile daha iyi uyumluluk sağlayan daha yeni versiyonlara güncellendi. Bu, `torch`'un doğru cuDNN fonksiyonlarını bulmasını sağladı.
+*   **Neden:** `torch` versiyonunun, Docker imajındaki `cuDNN 8` yerine daha yeni bir `cuDNN` versiyonu beklemesi.
+*   **Çözüm:** `faster-whisper` ve `ctranslate2` kütüphaneleri, `cuDNN 8` ile tam uyumluluk sağlayan güncel versiyonlara (`1.0.3` ve `4.3.1`) yükseltildi. Bu, `torch`'un doğru cuDNN fonksiyonlarını bulmasını sağladı.
 
 ### b. Sorun: `gRPC` Sunucusu Başlamıyor (`Mismatched Protobuf Versions` veya `ImportError`)
 *   **Neden:** `sentiric-contracts-py` paketi, `protobuf` kütüphanesinin eski bir versiyonu (`<4.0`) ile derlenmiş `protoc` tarafından oluşturulmuş. Bu, `protobuf 4.x` versiyonlarında kaldırılan `runtime_version` ve `Domain` gibi iç API'lere erişmeye çalışmasına neden oluyordu.
-*   **Çözüm:** `protobuf` versiyonunu `4.25.3`'e yükselttik ve `app/services/grpc_server.py` dosyasının başına, `sentiric-contracts-py`'nin beklediği eski API'leri taklit eden bir **"Monkey Patch"** eklendi. Bu, kontrat reposunu değiştirmeden sorunu çözmemizi sağladı.
+*   **Çözüm:** `protobuf` versiyonu `4.25.3`'e yükseltildi ve `app/services/grpc_server.py` dosyasının başına, `sentiric-contracts-py`'nin beklediği eski API'leri taklit eden bir **"Monkey Patch"** eklendi. Bu, kontrat reposunu değiştirmeden sorunu çözmemizi sağladı.
 
-### c. Sorun: `numba` Cache Hatası (`cannot cache function`)
-*   **Neden:** `librosa`'nın kullandığı `numba` kütüphanesi, Docker içinde JIT derlenmiş fonksiyonları önbelleğe almaya çalışırken hata veriyordu.
-*   **Çözüm:** Dockerfile'lara `ENV NUMBA_CACHE_DIR=/tmp` ortam değişkeni eklendi. Bu, `numba`'yı kalıcı önbellek yerine geçici bir dizin kullanmaya zorlayarak sorunu çözdü.
+### c. Sorun: `No space left on device` (CI Ortamında)
+*   **Neden:** Standart GitHub Actions runner'larının (`~14 GB`) disk alanı, özellikle GPU imajının build işlemi sırasında (`torch` kurulumu) oluşan devasa ara katmanlar için yetersiz kaldı.
+*   **Çözüm:** GPU `Dockerfile`'ı, kurulum ve temizlik işlemlerini tek bir `RUN` katmanında birleştiren "tek katmanlı kurulum" mimarisine geçirildi. Bu, build sırasındaki maksimum disk kullanımını düşürerek CI runner'ının limitleri içinde kalmasını sağladı.
 
-### d. Sorun: Docker Build Hataları (`bad interpreter`, `git not found`, `tzdata prompt`)
-*   **Neden:** Multi-stage build'lerde `venv`'in taşınabilir olmaması, `git`'in `builder` aşamasında eksik olması ve `apt`'nin interaktif girdi beklemesi.
-*   **Çözüm:**
-    1.  `venv` kopyalamak yerine, Python paketleri `pip wheel` ile `builder`'da indirilip `final` imajda kuruldu.
-    2.  `git` paketi `builder` aşamasına eklendi.
-    3.  `ENV DEBIAN_FRONTEND=noninteractive` değişkeni ile `apt`'nin interaktif modda çalışması engellendi.
+### d. Zararsız Uyarı: `UserWarning: pkg_resources is deprecated`
+*   **Neden:** `librosa` kütüphanesi, Python'da eski kabul edilen `pkg_resources` modülünü kullanmaktadır.
+*   **Durum:** Bu bir hata değil, sadece bilgilendirici bir uyarıdır. Uygulamanın çalışmasına hiçbir olumsuz etkisi yoktur ve güvenle göz ardı edilebilir.
 
 ---
+
+Bu doküman, projenin "yaşayan hafızası" olarak güncel tutulmalıdır. Yeni bir bağımlılık eklendiğinde veya büyük bir versiyon güncellemesi yapıldığında, buradaki notlar dikkate alınmalıdır.
 

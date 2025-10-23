@@ -1,5 +1,5 @@
 services:
-  stt-whisper-service:
+  gpu:
     image: ghcr.io/sentiric/sentiric-stt-whisper-service:gpu-latest
     build: 
       context: .
@@ -7,12 +7,13 @@ services:
     environment:
       - STT_WHISPER_SERVICE_DEVICE=cuda
       - STT_WHISPER_SERVICE_COMPUTE_TYPE=float16
-      - STT_WHISPER_SERVICE_MODEL_SIZE=large-v3
+      - STT_WHISPER_SERVICE_MODEL_SIZE=medium
     volumes: 
       - "../sentiric-certificates:/sentiric-certificates:ro"
       - "stt_whisper_cache:/app/model-cache"
     ports: 
       - "15030:15030"
+      - "15031:15031"      
     deploy:
       resources:
         reservations:

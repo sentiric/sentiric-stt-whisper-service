@@ -80,17 +80,23 @@ async def serve(transcriber: WhisperTranscriber):
                         language=request.language if request.language else None
                     )
 
+                    # --- DEĞİŞİKLİK BURADA ---
+                    # Hata veren "language" ve "language_probability" alanlarını kaldırıyoruz.
+                    # Muhtemelen proto tanımında bu alanlar yok veya farklı isimlendirilmiş.
                     return whisper_pb2.WhisperTranscribeResponse(
-                        transcription=result["text"],
-                        language=result["language"],
-                        language_probability=result["language_probability"],
-                        duration=result["duration"]
+                        transcription=result["text"]
+                        # language=result["language"], # BU SATIRI YORUMA AL/SİL
+                        # language_probability=result["language_probability"], # BU SATIRI YORUMA AL/SİL
+                        # duration=result["duration"]
                     )
 
+                except ValueError as ve: # Özellikle bu hatayı yakalayıp daha detaylı loglayalım
+                    logger.error("GRPC yanıtı oluşturulurken şema hatası", error=str(ve), exc_info=True)
+                    await context.abort(grpc.StatusCode.INTERNAL, f"Yanıt oluşturma hatası: {ve}")
                 except Exception as e:
                     logger.error("GRPC transkripsiyon hatası", error=str(e), exc_info=True)
                     await context.abort(grpc.StatusCode.INTERNAL, "Transkripsiyon sırasında bir hata oluştu.")
-
+                    
         # Server oluştur ve başlat
         server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
         whisper_pb2_grpc.add_SttWhisperServiceServicer_to_server(

@@ -144,6 +144,45 @@ Eğer `model_ready` değeri `false` ise, transkripsiyon istekleriniz `503 Servic
 
 ---
 
+---
+
+## 🔬 Test Etme
+
+### REST API Testi
+
+`curl` komutunu kullanarak REST API'yi test edebilirsiniz:
+
+```bash
+curl -X POST \
+  -F "file=@/path/to/your/audio.wav" \
+  -F "language=tr" \
+  http://localhost:15030/api/v1/transcribe
+```
+
+### gRPC API Testi
+
+gRPC arayüzünü test etmek için `grpc_test_client.py` script'ini kullanabilirsiniz.
+
+1.  **Gerekli İstemci Kütüphanelerini Kurun:**
+    ```bash
+    pip install grpcio grpcio-tools sentiric-contracts-py@git+https://github.com/sentiric/sentiric-contracts.git@v1.9.3
+    ```
+
+2.  **Test Script'ini Çalıştırın:**
+    Servisin `docker-compose` dosyasında `15031` portunun map edildiğinden emin olun (`- "15031:15031"`).
+
+    ```bash
+    python3 grpc_test_client.py /path/to/your/audio.wav tr
+    ```
+
+    Başarılı bir istek sonucunda aşağıdaki gibi bir çıktı almalısınız:
+
+    ```
+    ✅ BAŞARILI GRPC YANITI:
+      Metin: 'transkripsiyon metni burada yer alır'
+      Süre: 9.20s
+    ```
+
 ## ⚙️ Yapılandırma (Environment Değişkenleri)
 
 Servis, ortam değişkenleri ile yapılandırılır. Başlıca ayarlar:
