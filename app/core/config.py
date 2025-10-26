@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # API Settings
     STT_WHISPER_SERVICE_HTTP_PORT: int = 15030
-    STT_WHISPER_SERVICE_GRPC_PORT: int = 15031
+    STT_WHISPER_SERVICE_GRPC_PORT: int = 15031 # <-- YENİ EKLENDİ
     STT_WHISPER_SERVICE_METRICS_PORT: int = 15032
     
     # Whisper Model Settings
@@ -54,7 +54,6 @@ class Settings(BaseSettings):
 
     def setup_environment(self):
         """Runtime environment optimizasyonları"""
-        # Debug flag'lerini ayarla
         os.environ.update({
             'NUMBA_DEBUG': '0',
             'NUMBA_DISABLE_JIT': '0', 
@@ -70,6 +69,5 @@ class Settings(BaseSettings):
         extra='ignore'
     )
 
-# Settings instance ve environment setup
 settings = Settings()
 settings.setup_environment()

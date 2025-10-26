@@ -1,12 +1,14 @@
 # =================================================================
-#    SENTIRIC STT-WHISPER-SERVICE - CPU & SIZE-OPTIMIZED (CI-READY) v10
+#    SENTIRIC STT-WHISPER-SERVICE - CPU & SIZE-OPTIMIZED (STABLE v12)
 # =================================================================
 
 # --- STAGE 1: Builder ---
 FROM python:3.11-slim-bookworm AS builder
 WORKDIR /wheelhouse
-RUN apt-get update && apt-get install -y --no-install-recommends git \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+# ÖNEMLİ: wheel paketini kuruyoruz!
+RUN apt-get update && apt-get install -y --no-install-recommends git && \
+    pip install --no-cache-dir wheel && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip wheel --no-cache-dir -r requirements.txt
 
@@ -20,34 +22,25 @@ ENV GIT_COMMIT=${GIT_COMMIT} \
     SERVICE_VERSION=${SERVICE_VERSION} \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    NUMBA_CACHE_DIR=/tmp \
-    HF_HOME=/app/model-cache \
-    TZ=Etc/UTC \
-    DEBIAN_FRONTEND=noninteractive
+    HF_HOME=/app/model-cache
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     curl \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    && rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY --from=builder /wheelhouse /wheelhouse
 RUN pip install --no-cache-dir /wheelhouse/*.whl \
-    && rm -rf /wheelhouse \
-    && rm -rf /root/.cache/pip \
-    && find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + \
-    && find /opt/venv -type f -name "*.pyc" -delete \
-    && find /opt/venv -type d -name "tests" -exec rm -rf {} + \
-    && find /opt/venv -type d -name "test" -exec rm -rf {} +
+    && rm -rf /wheelhouse /root/.cache/pip
 RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
 COPY --chown=appuser:appgroup ./app ./app
-RUN mkdir -p /app/model-cache /tmp/numba_cache \
-    && chown -R appuser:appgroup /app /tmp/numba_cache
+RUN mkdir -p /app/model-cache && chown -R appuser:appgroup /app/model-cache
 USER appuser
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:15030/health || exit 1
 EXPOSE 15030 15031
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "15030", "--no-access-log"]
+CMD ["python", "-m", "app.runner"]

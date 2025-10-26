@@ -14,9 +14,10 @@ dependencies = [
     "uvicorn[standard]==0.24.0",
     "httpx==0.27.0",
     
-    # STT Engine - CUDA FIXED
-    "faster-whisper==1.0.2",
-    "torch==2.5.0",
+    # STT Engine
+    "faster-whisper==1.0.3",
+    "ctranslate2==4.3.1",
+    "torch==2.3.0",
     
     # Audio Processing
     "soundfile==0.12.1",
@@ -34,10 +35,10 @@ dependencies = [
     "prometheus-client==0.20.0",
     "prometheus-fastapi-instrumentator==6.0.0",
     
-    # gRPC & Contracts - PROTOBUF RANGE FIXED
+    # gRPC & Contracts - YENİ EKLENDİ
     "grpcio>=1.62.0",
-    "protobuf==5.29.5", # SABİTLENDİ
-    "sentiric-contracts-py @ git+https://github.com/sentiric/sentiric-contracts.git@v1.9.3",
+    "grpcio-tools>=1.62.0",
+    "sentiric-contracts-py @ git+https://github.com/sentiric/sentiric-contracts.git@v1.9.4",
     
     # System & Utilities
     "aiofiles==23.2.1",

@@ -26,7 +26,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s  # GPU model loading takes longer
+      start_period: 120s
 
 volumes:
   stt_whisper_cache:

@@ -1,115 +1,111 @@
-# =====================================================================
-# MONKEY PATCH FOR PROTOBUF v4+ COMPATIBILITY v2
-# The generated contract expects 'google.protobuf.runtime_version.Domain'.
-# This object was part of the internal API in older protobuf versions.
-# We simulate this object and its 'PUBLIC' attribute to satisfy the import.
+# File: app/services/grpc_server.py
+import asyncio
+import io
+import librosa
+import numpy as np
+import structlog
+from concurrent import futures
+from typing import AsyncIterator # <-- YENİ: Doğru tip tanımı buradan import edildi
+
+# === PROTOBUF v4+ UYUMLULUK MONKEY PATCH ===
 import google.protobuf
 if not hasattr(google.protobuf, 'runtime_version'):
     from types import ModuleType, SimpleNamespace
-    
-    # Sahte 'Domain' nesnesini oluştur
     domain = SimpleNamespace()
-    domain.PUBLIC = 0  # Genellikle 0 veya 1 gibi bir enum değeridir
-    
-    # Sahte 'runtime_version' modülünü oluştur
+    domain.PUBLIC = 0
     runtime_version_module = ModuleType('google.protobuf.runtime_version')
-    
-    # Sahte modülün içine sahte 'Domain' nesnesini ekle
     setattr(runtime_version_module, 'Domain', domain)
-    
-    # Eski Validate fonksiyonunu da ekle (boş olsa da)
-    def ValidateProtobufRuntimeVersion(*args, **kwargs):
-        pass
+    def ValidateProtobufRuntimeVersion(*args, **kwargs): pass
     runtime_version_module.ValidateProtobufRuntimeVersion = ValidateProtobufRuntimeVersion
-    
-    # Ana protobuf modülüne sahte modülü bağla
     google.protobuf.runtime_version = runtime_version_module
-# END OF MONKEY PATCH
-# =====================================================================
+# === PATCH SONU ===
 
-import structlog
-import numpy as np
-import librosa
-import io
-
-from app.core.config import settings
+import grpc
+from sentiric.stt.v1 import whisper_pb2, whisper_pb2_grpc
 from app.services.whisper_service import WhisperTranscriber
+from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
 
-async def serve(transcriber: WhisperTranscriber):
-    """GRPC server'ı başlat - PROTOBUF VERSİYON SORUNU ÇÖZÜLDÜ"""
-    try:
-        # GRPC ve protobuf import'ları
-        import grpc
-        from concurrent import futures
+class SttWhisperServiceServicer(whisper_pb2_grpc.SttWhisperServiceServicer):
+    def __init__(self, transcriber: WhisperTranscriber):
+        self.transcriber = transcriber
+        logger.info("gRPC Servicer for Whisper initialized.")
+
+    async def WhisperTranscribe(self, request: whisper_pb2.WhisperTranscribeRequest, context: grpc.aio.ServicerContext):
+        logger.info("gRPC WhisperTranscribe isteği alındı.", language_hint=request.language)
+        if not self.transcriber or not self.transcriber.model_loaded:
+            await context.abort(grpc.StatusCode.UNAVAILABLE, "Model henüz hazır değil.")
         
-        # Sentiric Contracts import'u - PROTOBUF VERSİYON UYUMLU
-        from sentiric.stt.v1 import whisper_pb2
-        from sentiric.stt.v1 import whisper_pb2_grpc
+        try:
+            audio_array, _ = librosa.load(
+                io.BytesIO(request.audio_data),
+                sr=settings.STT_WHISPER_SERVICE_TARGET_SAMPLE_RATE,
+                mono=True
+            )
+            audio_array = audio_array.astype(np.float32)
+
+            result = self.transcriber.transcribe(
+                audio_data=audio_array,
+                language=request.language if request.language else None
+            )
+
+            return whisper_pb2.WhisperTranscribeResponse(
+                transcription=result["text"],
+                language=result["language"],
+                language_probability=result["language_probability"],
+                duration=result["duration"]
+            )
+        except Exception as e:
+            logger.error("gRPC transkripsiyon hatası", error=str(e), exc_info=True)
+            await context.abort(grpc.StatusCode.INTERNAL, "Transkripsiyon sırasında bir hata oluştu.")
+
+    # --- DÜZELTME BURADA ---
+    async def WhisperTranscribeStream(self, request_iterator: AsyncIterator[whisper_pb2.WhisperTranscribeStreamRequest], context: grpc.aio.ServicerContext):
+        if not self.transcriber or not self.transcriber.model_loaded:
+            await context.abort(grpc.StatusCode.UNAVAILABLE, "Model henüz hazır değil.")
+
+        logger.info("gRPC streaming isteği başlatıldı.")
+
+        async def audio_chunk_generator():
+            async for req in request_iterator:
+                audio_float = np.frombuffer(req.audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
+                yield audio_float
         
-        logger.info("GRPC servisi başlatılıyor...")
+        try:
+            # faster-whisper'ın generator'ları doğrudan kabul etme yeteneğini kullanıyoruz
+            segments, info = self.transcriber.model.transcribe(
+                audio_chunk_generator(),
+                beam_size=settings.STT_WHISPER_SERVICE_BEAM_SIZE,
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=700) # Daha iyi segmentasyon için VAD ayarı
+            )
 
-        class SttWhisperServiceServicer(whisper_pb2_grpc.SttWhisperServiceServicer):
-            def __init__(self, transcriber: WhisperTranscriber):
-                self.transcriber = transcriber
-                logger.info("GRPC Servicer başlatıldı.")
+            # Segmentleri asenkron olarak işlemek için bir yardımcı fonksiyon
+            async def process_segments(segments_iterator):
+                for segment in segments_iterator:
+                    yield segment
+            
+            async for segment in process_segments(segments):
+                logger.debug("Stream segmenti üretildi", text=segment.text.strip())
+                yield whisper_pb2.WhisperTranscribeStreamResponse(
+                    transcription=segment.text.strip(),
+                    is_final=True # faster-whisper stream'i segment bazlı çalışır, her segment final'dır.
+                )
+        except Exception as e:
+            logger.error("gRPC stream işlenirken hata.", error=str(e), exc_info=True)
+            await context.abort(grpc.StatusCode.INTERNAL, "Stream işlenirken hata oluştu.")
+        finally:
+            logger.info("gRPC streaming isteği tamamlandı.")
 
-            async def WhisperTranscribe(
-                self, request: whisper_pb2.WhisperTranscribeRequest, 
-                context: grpc.aio.ServicerContext
-            ) -> whisper_pb2.WhisperTranscribeResponse:
-                
-                logger.info("GRPC WhisperTranscribe isteği alındı.", language_hint=request.language)
 
-                if not self.transcriber or not self.transcriber.model_loaded:
-                    await context.abort(grpc.StatusCode.UNAVAILABLE, "Model henüz hazır değil.")
-                
-                try:
-                    # Gelen byte'ları librosa ile standart formata çevir
-                    audio_array, _ = librosa.load(
-                        io.BytesIO(request.audio_data),
-                        sr=settings.STT_WHISPER_SERVICE_TARGET_SAMPLE_RATE,
-                        mono=True
-                    )
-                    audio_array = audio_array.astype(np.float32)
-
-                    # Transkripsiyon işlemini gerçekleştir
-                    result = self.transcriber.transcribe(
-                        audio_data=audio_array,
-                        language=request.language if request.language else None
-                    )
-
-                    # --- DEĞİŞİKLİK BURADA ---
-                    # Hata veren "language" ve "language_probability" alanlarını kaldırıyoruz.
-                    # Muhtemelen proto tanımında bu alanlar yok veya farklı isimlendirilmiş.
-                    return whisper_pb2.WhisperTranscribeResponse(
-                        transcription=result["text"]
-                        # language=result["language"], # BU SATIRI YORUMA AL/SİL
-                        # language_probability=result["language_probability"], # BU SATIRI YORUMA AL/SİL
-                        # duration=result["duration"]
-                    )
-
-                except ValueError as ve: # Özellikle bu hatayı yakalayıp daha detaylı loglayalım
-                    logger.error("GRPC yanıtı oluşturulurken şema hatası", error=str(ve), exc_info=True)
-                    await context.abort(grpc.StatusCode.INTERNAL, f"Yanıt oluşturma hatası: {ve}")
-                except Exception as e:
-                    logger.error("GRPC transkripsiyon hatası", error=str(e), exc_info=True)
-                    await context.abort(grpc.StatusCode.INTERNAL, "Transkripsiyon sırasında bir hata oluştu.")
-                    
-        # Server oluştur ve başlat
-        server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
-        whisper_pb2_grpc.add_SttWhisperServiceServicer_to_server(
-            SttWhisperServiceServicer(transcriber), server
-        )
-        
-        listen_addr = f"[::]:{settings.STT_WHISPER_SERVICE_GRPC_PORT}"
-        server.add_insecure_port(listen_addr)
-        await server.start()
-        
-        logger.info(f"✅ GRPC sunucusu başlatıldı ve dinleniyor: {listen_addr}")
-        return server
-        
-    except Exception as e:
-        logger.error("❌ GRPC server başlatılamadı", error=str(e), exc_info=True)
-        return None
+async def serve(transcriber: WhisperTranscriber) -> grpc.aio.Server:
+    server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
+    whisper_pb2_grpc.add_SttWhisperServiceServicer_to_server(
+        SttWhisperServiceServicer(transcriber), server
+    )
+    listen_addr = f'[::]:{settings.STT_WHISPER_SERVICE_GRPC_PORT}'
+    server.add_insecure_port(listen_addr)
+    logger.info(f"gRPC sunucusu başlatılıyor...", address=listen_addr)
+    await server.start()
+    return server
