@@ -20,8 +20,7 @@ services:
       - "15031:15031"
       - "15032:15032"
     
-    # Model Kalıcılığı (Production için Volume)
-    # Development için override.yml bunu ezer.
+    # Model Kalıcılığı
     volumes:
       - whisper_models:/models
 
@@ -34,25 +33,31 @@ services:
       
       # --- Model Yönetimi ---
       - STT_WHISPER_SERVICE_MODEL_DIR=/models
-      - STT_WHISPER_SERVICE_MODEL_FILENAME=ggml-base.bin
-      # İsteğe bağlı: Custom model URL'i
-      # - STT_WHISPER_SERVICE_MODEL_URL=https://huggingface.co/.../ggml-model.bin
+      - STT_WHISPER_SERVICE_MODEL_FILENAME=ggml-medium.bin
+      # VAD Modeli (Otomatik indirilir)
+      - STT_WHISPER_SERVICE_VAD_MODEL=ggml-silero-vad.bin
       
       # --- Motor ve Performans ---
       - STT_WHISPER_SERVICE_THREADS=4
-      - STT_WHISPER_SERVICE_DEVICE=auto  # auto, cuda, cpu
-      - STT_WHISPER_SERVICE_COMPUTE_TYPE=int8 # int8 (CPU), float16 (GPU)
+      - STT_WHISPER_SERVICE_DEVICE=auto
+      # YENİ: Dynamic Batching (Aynı anda işlenecek istek sayısı)
+      - STT_WHISPER_SERVICE_PARALLEL_REQUESTS=2
       
       # --- Transkripsiyon Ayarları ---
       - STT_WHISPER_SERVICE_LANGUAGE=auto
       - STT_WHISPER_SERVICE_TRANSLATE=false
+      # YENİ: Konuşmacı Ayrıştırma (Varsayılan Açık)
+      - STT_WHISPER_SERVICE_ENABLE_DIARIZATION=true
+      - STT_WHISPER_SERVICE_ENABLE_VAD=true
       
-      # --- Gelişmiş Ayarlar (Yeni) ---
+      # --- Gelişmiş Ayarlar ---
       - STT_WHISPER_SERVICE_BEAM_SIZE=5
       - STT_WHISPER_SERVICE_TEMPERATURE=0.0
       - STT_WHISPER_SERVICE_BEST_OF=5
       - STT_WHISPER_SERVICE_LOGPROB_THRESHOLD=-1.0
       - STT_WHISPER_SERVICE_NO_SPEECH_THRESHOLD=0.6
+      - STT_WHISPER_SERVICE_FLASH_ATTN=true
+      - STT_WHISPER_SERVICE_SUPPRESS_NST=true
       
       # --- Loglama ---
       - STT_WHISPER_SERVICE_LOG_LEVEL=info

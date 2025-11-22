@@ -18,3 +18,4 @@ services:
     environment:
       - STT_WHISPER_SERVICE_DEVICE=cuda
       - STT_WHISPER_SERVICE_COMPUTE_TYPE=float16
+     
