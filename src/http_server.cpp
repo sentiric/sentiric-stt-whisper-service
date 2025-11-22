@@ -5,11 +5,10 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
-#include <iomanip> // HEX dump için gerekli
+#include <iomanip>
 
 using json = nlohmann::json;
 
-// Helper: UTF-8 Temizliği
 std::string clean_utf8(const std::string& str) {
     std::string res;
     res.reserve(str.size());
@@ -32,7 +31,6 @@ std::string clean_utf8(const std::string& str) {
     return res;
 }
 
-// Helper: Hex Dump (Debugging için)
 std::string hex_dump(const void* data, size_t size) {
     const unsigned char* p = static_cast<const unsigned char*>(data);
     std::stringstream ss;
@@ -43,8 +41,7 @@ std::string hex_dump(const void* data, size_t size) {
     return ss.str();
 }
 
-// --- MetricsServer Implementation ---
-
+// --- MetricsServer ---
 MetricsServer::MetricsServer(const std::string& host, int port, prometheus::Registry& registry)
     : host_(host), port_(port), registry_(registry) {
     svr_.Get("/metrics", [this](const httplib::Request &, httplib::Response &res) {
@@ -65,8 +62,7 @@ void MetricsServer::stop() {
     if (svr_.is_running()) svr_.stop();
 }
 
-// --- HttpServer Implementation ---
-
+// --- HttpServer ---
 HttpServer::HttpServer(std::shared_ptr<SttEngine> engine, AppMetrics& metrics, const std::string& host, int port)
     : engine_(std::move(engine)), metrics_(metrics), host_(host), port_(port) {
     setup_routes();
@@ -74,9 +70,7 @@ HttpServer::HttpServer(std::shared_ptr<SttEngine> engine, AppMetrics& metrics, c
 
 void HttpServer::setup_routes() {
     auto ret = svr_.set_mount_point("/", "./studio");
-    if (!ret) {
-        spdlog::warn("⚠️ Could not mount ./studio directory. UI might not work.");
-    }
+    if (!ret) spdlog::warn("⚠️ Could not mount ./studio directory.");
 
     svr_.Get("/health", [this](const httplib::Request &, httplib::Response &res) {
         bool ready = engine_->is_ready();
@@ -84,7 +78,7 @@ void HttpServer::setup_routes() {
             {"status", ready ? "healthy" : "unhealthy"},
             {"model_ready", ready},
             {"service", "sentiric-stt-whisper-service"},
-            {"version", "2.2.3"}, // Patch Bump for Robust WAV Parsing
+            {"version", "2.2.4"}, // Patch: Wav Self-Healing
             {"api_compatibility", "openai-whisper"}
         };
         res.set_header("Access-Control-Allow-Origin", "*");
@@ -136,15 +130,9 @@ void HttpServer::setup_routes() {
             
             DecodedAudio audio = parse_wav_robust(file.content);
             
-            if (audio.pcm_data.empty()) {
-                throw std::runtime_error("Parsed WAV data is empty.");
-            }
+            if (audio.pcm_data.empty()) throw std::runtime_error("Parsed WAV data is empty.");
 
-            auto results = engine_->transcribe_pcm16(
-                audio.pcm_data, 
-                audio.sample_rate, 
-                opts
-            );
+            auto results = engine_->transcribe_pcm16(audio.pcm_data, audio.sample_rate, opts);
             
             auto end_time = std::chrono::steady_clock::now();
             std::chrono::duration<double> processing_time = end_time - start_time;
@@ -199,7 +187,6 @@ void HttpServer::setup_routes() {
 
         } catch (const std::exception& e) {
             spdlog::error("Transcription error: {}", e.what());
-            // HATA ANINDA HEX DUMP BAS (İlk 64 byte)
             if (file.content.size() > 0) {
                 size_t dump_size = std::min((size_t)64, file.content.size());
                 spdlog::error("WAV Header Dump (First {} bytes): {}", dump_size, hex_dump(file.content.data(), dump_size));
@@ -220,9 +207,8 @@ DecodedAudio HttpServer::parse_wav_robust(const std::string& bytes) {
     const uint8_t* data = reinterpret_cast<const uint8_t*>(bytes.data());
     size_t ptr = 0;
 
-    // Header Check
     if (std::memcmp(data + ptr, "RIFF", 4) != 0) throw std::runtime_error("Invalid WAV: No RIFF");
-    ptr += 8; // Skip RIFF + Size
+    ptr += 8; 
     if (std::memcmp(data + ptr, "WAVE", 4) != 0) throw std::runtime_error("Invalid WAV: No WAVE");
     ptr += 4;
 
@@ -240,13 +226,16 @@ DecodedAudio HttpServer::parse_wav_robust(const std::string& bytes) {
         std::memcpy(&chunk_size, data + ptr, 4);
         ptr += 4;
 
-        // Debug Log
-        // spdlog::debug("WAV Chunk Found: ID='{}' Size={}", chunk_id, chunk_size);
-
         if (std::memcmp(chunk_id, "fmt ", 4) == 0) {
+            // --- SELF-HEALING LOGIC ---
+            if (chunk_size == 0) {
+                spdlog::warn("⚠️ Malformed WAV detected: 'fmt ' chunk size is 0. Attempting repair (Assuming standard PCM 16).");
+                chunk_size = 16; 
+            }
+            // --------------------------
+
             if (chunk_size < 16) {
-                spdlog::error("Invalid fmt chunk size: {}", chunk_size);
-                throw std::runtime_error("Invalid fmt chunk size (must be >= 16)");
+                throw std::runtime_error("Invalid fmt chunk size: " + std::to_string(chunk_size));
             }
             
             uint16_t format_tag;
@@ -267,27 +256,19 @@ DecodedAudio HttpServer::parse_wav_robust(const std::string& bytes) {
             
             pcm_start = data + ptr;
             pcm_size_bytes = chunk_size;
-            // Veri bulundu, daha fazla okumaya gerek yok (ya da meta data için okunabilir)
             break; 
         } 
         else {
-            // Bilinmeyen chunk'ı atla
             ptr += chunk_size;
         }
 
-        // Padding byte
         if (chunk_size % 2 != 0) ptr++;
     }
 
-    if (!pcm_start || pcm_size_bytes == 0) {
-        throw std::runtime_error("No 'data' chunk found or empty");
-    }
+    if (!pcm_start || pcm_size_bytes == 0) throw std::runtime_error("No 'data' chunk found");
 
-    if (bits_per_sample != 16) {
-        throw std::runtime_error("Unsupported bit depth: " + std::to_string(bits_per_sample));
-    }
+    if (bits_per_sample != 16) throw std::runtime_error("Unsupported bit depth: " + std::to_string(bits_per_sample));
 
-    // Güvenlik: Veri boyutu, string boyutunu aşıyor mu?
     size_t remaining = bytes.size() - (pcm_start - data);
     if (pcm_size_bytes > remaining) {
         spdlog::warn("WAV data chunk size ({}) > remaining bytes ({})! Truncating.", pcm_size_bytes, remaining);
@@ -304,13 +285,11 @@ DecodedAudio HttpServer::parse_wav_robust(const std::string& bytes) {
         size_t frames = num_samples / 2;
         result.pcm_data.resize(frames);
         for (size_t i = 0; i < frames; ++i) {
-            // Stereo -> Mono (Average)
             int32_t mixed = (int32_t)raw_samples[i*2] + (int32_t)raw_samples[i*2 + 1];
             result.pcm_data[i] = static_cast<int16_t>(mixed / 2);
         }
     } 
     else {
-        // Multichannel -> First channel only
         size_t frames = num_samples / result.channels;
         result.pcm_data.resize(frames);
         for (size_t i = 0; i < frames; ++i) {
