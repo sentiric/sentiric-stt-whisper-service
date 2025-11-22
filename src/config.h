@@ -15,7 +15,7 @@ struct Settings {
     // Model
     std::string model_dir = "/models";
     std::string model_filename = "ggml-base.bin"; 
-    // YENİ: Otomatik indirme için varsayılan URL şablonu
+    // YENİ: Otomatik indirme için URL şablonu
     std::string model_url_template = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin";
     
     // STT Engine Settings
@@ -23,9 +23,6 @@ struct Settings {
     std::string language = "auto"; 
     bool translate = false;
     bool no_timestamps = false;
-    
-    // Audio Processing
-    int sample_rate = 16000; 
     
     // Logging
     std::string log_level = "info";
@@ -60,7 +57,6 @@ inline Settings load_settings() {
 
     s.model_dir = get_env("STT_WHISPER_SERVICE_MODEL_DIR", s.model_dir);
     s.model_filename = get_env("STT_WHISPER_SERVICE_MODEL_FILENAME", s.model_filename);
-    // YENİ
     s.model_url_template = get_env("STT_WHISPER_SERVICE_MODEL_URL", s.model_url_template);
 
     s.n_threads = get_int("STT_WHISPER_SERVICE_THREADS", s.n_threads);
