@@ -1,11 +1,10 @@
-# --- Derleme Aşaması (NVIDIA Devel) ---
+# --- Derleme Aşaması ---
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
 
 # 1. Temel bağımlılıklar
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git cmake build-essential curl zip unzip tar \
-    pkg-config ninja-build ca-certificates python3 \
-    && rm -rf /var/lib/apt/lists/*
+    pkg-config ninja-build ca-certificates python3
 
 # 2. Vcpkg Kurulumu
 ARG VCPKG_VERSION=2024.05.24
@@ -31,16 +30,13 @@ RUN git clone https://github.com/ggerganov/whisper.cpp.git whisper.cpp && \
 COPY src ./src
 COPY CMakeLists.txt .
 
-# 6. Projeyi Derle (GPU Optimizasyonlu)
-# -DGGML_CUDA=1: GPU desteğini açar.
-# v1.8.2 ile Flash Attention varsayılan olarak gelir, CUDA varsa aktif olur.
+# 6. Projeyi Derle (GGML_CUDA=1 korundu)
 RUN cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
     -DWHISPER_BUILD_TESTS=OFF \
     -DWHISPER_BUILD_EXAMPLES=OFF \
-    -DGGML_CUDA=1
-    
+    -DGGML_CUDA=1 
 RUN cmake --build build --target all -j $(nproc)
 
 # Artifact Toplama
@@ -48,31 +44,23 @@ RUN mkdir -p /app/dist/bin /app/dist/lib && \
     find /app/build -maxdepth 1 -type f -executable -name "stt_*" -exec cp {} /app/dist/bin/ \; && \
     find /app/build -name "*.so*" -exec cp {} /app/dist/lib/ \; || true
 
-# --- Çalışma Aşaması (NVIDIA Runtime) ---
+# --- Çalışma Aşaması ---
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libgomp1 curl libsndfile1 \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    ca-certificates libgomp1 curl libsndfile1 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Executable'ları kopyala
 COPY --from=builder /app/dist/bin/* /usr/local/bin/
-
-# Kütüphaneleri kopyala (vcpkg + local + cuda deps)
 COPY --from=builder /app/vcpkg_installed/x64-linux/lib/*.so* /usr/local/lib/
 COPY --from=builder /app/dist/lib/*.so* /usr/local/lib/
 RUN ldconfig
 
-# UI ve Script Dosyalarını Kopyala
 COPY studio /app/studio
-# COPY scripts /app/scripts
+# DÜZELTME: Scripts kaldırıldı
 
 WORKDIR /app
 RUN mkdir -p /models
-
-# GPU Ortam Değişkenleri
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 EXPOSE 15030 15031 15032
 

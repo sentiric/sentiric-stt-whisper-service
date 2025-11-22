@@ -20,7 +20,7 @@ WORKDIR /app
 COPY vcpkg.json .
 RUN /opt/vcpkg/vcpkg install --triplet x64-linux
 
-# 4. whisper.cpp'yi Klonla (GÜNCELLENDİ: v1.8.2)
+# 4. whisper.cpp'yi Klonla (v1.8.2)
 ARG WHISPER_CPP_VERSION=v1.8.2
 RUN git clone https://github.com/ggerganov/whisper.cpp.git whisper.cpp && \
     cd whisper.cpp && \
@@ -30,13 +30,14 @@ RUN git clone https://github.com/ggerganov/whisper.cpp.git whisper.cpp && \
 COPY src ./src
 COPY CMakeLists.txt .
 
-# 6. Projeyi Derle (GGML_CUDA=1 korundu)
+# 6. Projeyi Derle (CPU MODE)
+# DÜZELTME: GGML_CUDA=0 yapıldı.
 RUN cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
     -DWHISPER_BUILD_TESTS=OFF \
     -DWHISPER_BUILD_EXAMPLES=OFF \
-    -DGGML_CUDA=1 
+    -DGGML_CUDA=0 
 RUN cmake --build build --target all -j $(nproc)
 
 # Artifact Toplama
@@ -57,14 +58,10 @@ COPY --from=builder /app/dist/lib/*.so* /usr/local/lib/
 RUN ldconfig
 
 COPY studio /app/studio
-# COPY scripts /app/scripts 
+# DÜZELTME: Scripts klasörü silindiği için COPY satırı kaldırıldı.
 
 WORKDIR /app
 RUN mkdir -p /models
-
-# Modelleri indir (Container build sırasında veya entrypoint'te yapılabilir)
-# En iyisi entrypoint scripti ile çalışma zamanında indirmektir.
-# Şimdilik scripti kopyaladık, kullanıcı manuel çalıştıracak veya ModelManager yapacak.
 
 EXPOSE 15030 15031 15032
 
