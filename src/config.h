@@ -18,18 +18,20 @@ struct Settings {
     std::string model_url_template = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin";
     int model_load_timeout = 600;
 
-    // --- VAD Settings (NİHAİ DÜZELTME) ---
-    // Yerelde kullanılacak dosya adı (Kod bu ismi arar)
+    // --- VAD Settings ---
     std::string vad_model_filename = "ggml-silero-vad.bin"; 
-    
-    // İndirilecek Kaynak URL (ggml-org/whisper-vad reposu - v6.2.0)
-    std::string vad_model_url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin";
-    
+    std::string vad_model_url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin";
     bool enable_vad = true;
     float vad_threshold = 0.5f;        
     int vad_ms_min_duration = 500;     
     
+    // --- Performans & Batching (GÜNCELLENDİ) ---
     int n_threads = std::min(4, (int)std::thread::hardware_concurrency());
+    
+    // Aynı anda işlenebilecek maksimum istek sayısı (GPU VRAM'e bağlıdır)
+    // RTX 3060 (12GB) -> Medium model ile ~4-6 arası güvenlidir.
+    int parallel_requests = 2; 
+
     std::string device = "auto"; 
     std::string compute_type = "int8";
 
@@ -84,7 +86,6 @@ inline Settings load_settings() {
     std::string size = get_env("STT_WHISPER_SERVICE_MODEL_SIZE", "medium");
     s.model_filename = get_env("STT_WHISPER_SERVICE_MODEL_FILENAME", "ggml-" + size + ".bin");
     
-    // --- VAD Config ---
     s.vad_model_filename = get_env("STT_WHISPER_SERVICE_VAD_MODEL", "ggml-silero-vad.bin");
     s.vad_model_url = get_env("STT_WHISPER_SERVICE_VAD_URL", s.vad_model_url);
     s.enable_vad = get_bool("STT_WHISPER_SERVICE_ENABLE_VAD", s.enable_vad);
@@ -94,6 +95,9 @@ inline Settings load_settings() {
     s.suppress_nst = get_bool("STT_WHISPER_SERVICE_SUPPRESS_NST", s.suppress_nst);
 
     s.n_threads = get_int("STT_WHISPER_SERVICE_THREADS", s.n_threads);
+    // YENİ: Paralel istek sayısı
+    s.parallel_requests = get_int("STT_WHISPER_SERVICE_PARALLEL_REQUESTS", s.parallel_requests);
+
     s.language = get_env("STT_WHISPER_SERVICE_LANGUAGE", s.language);
     s.translate = get_bool("STT_WHISPER_SERVICE_TRANSLATE", s.translate);
     

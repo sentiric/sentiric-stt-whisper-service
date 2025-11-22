@@ -1,11 +1,13 @@
 #pragma once
 
 #include "config.h"
-#include "whisper.h" // whisper.cpp v1.8.2
+#include "whisper.h"
 #include <vector>
 #include <string>
 #include <mutex>
 #include <memory>
+#include <queue>
+#include <condition_variable>
 
 struct TokenData {
     std::string text;
@@ -44,17 +46,22 @@ public:
 
 private:
     std::vector<float> resample_audio(const std::vector<float>& input, int src_rate, int target_rate);
-    
-    // VAD (Voice Activity Detection) Kontrolü
     bool is_speech_detected(const std::vector<float>& pcmf32);
 
+    // Yardımcı: Havuzdan boş bir state al
+    struct whisper_state* acquire_state();
+    // Yardımcı: State'i havuza geri bırak
+    void release_state(struct whisper_state* state);
+
     Settings settings_;
-    struct whisper_context* ctx_ = nullptr;
+    struct whisper_context* ctx_ = nullptr; // Ana Model (Shared Read-Only)
+    struct whisper_vad_context* vad_ctx_ = nullptr;
     
-    // YENİ: VAD Context (Silero)
-    // Whisper.cpp v1.8.2 vad struct'ı değiştiği için generic void* veya doğru struct kullanılmalı.
-    // Header'da forward declaration sorunu yaşamamak için pointer tutuyoruz.
-    struct whisper_vad_context* vad_ctx_ = nullptr; 
-    
-    std::mutex mutex_; 
+    // --- Dynamic Batching: State Pool ---
+    std::queue<struct whisper_state*> state_pool_; // Boştaki state'ler
+    std::mutex pool_mutex_;
+    std::condition_variable pool_cv_;
+    std::vector<struct whisper_state*> all_states_; // Temizlik için tüm state referansları
+
+    std::mutex vad_mutex_; // VAD thread-safe olmayabilir, koruyoruz.
 };
