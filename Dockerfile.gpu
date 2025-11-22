@@ -1,7 +1,6 @@
 # --- Derleme Aşaması (GPU) ---
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
 
-# 1. Temel bağımlılıklar
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git cmake build-essential curl zip unzip tar \
@@ -33,7 +32,6 @@ COPY src ./src
 COPY CMakeLists.txt .
 
 # 6. Projeyi Derle (CUDA AKTİF)
-# -DGGML_CUDA=ON ile GPU desteğini açıyoruz
 RUN cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
@@ -43,6 +41,11 @@ RUN cmake -B build \
     
 RUN cmake --build build --target all -j $(nproc)
 
+# --- DÜZELTME ADIMI: Artifact Toplama ---
+RUN mkdir -p /app/dist/bin /app/dist/lib && \
+    find /app/build -maxdepth 1 -type f -executable -name "stt_*" -exec cp {} /app/dist/bin/ \; && \
+    find /app/build -name "*.so*" -exec cp {} /app/dist/lib/ \; || true
+
 # --- Çalışma Aşaması (Runtime) ---
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
 
@@ -51,12 +54,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libgomp1 curl libsndfile1 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/build/stt_service /usr/local/bin/
-COPY --from=builder /app/build/stt_cli /usr/local/bin/
+# Executable'ları kopyala
+COPY --from=builder /app/dist/bin/* /usr/local/bin/
 
-# Kütüphaneleri taşı
+# Kütüphaneleri kopyala
 COPY --from=builder /app/vcpkg_installed/x64-linux/lib/*.so* /usr/local/lib/
-COPY --from=builder /app/build/bin/*.so /usr/local/lib/
+COPY --from=builder /app/dist/lib/*.so* /usr/local/lib/
 RUN ldconfig
 
 WORKDIR /app

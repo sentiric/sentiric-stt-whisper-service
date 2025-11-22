@@ -20,8 +20,7 @@ WORKDIR /app
 COPY vcpkg.json .
 RUN /opt/vcpkg/vcpkg install --triplet x64-linux
 
-# 4. whisper.cpp'yi Klonla (Sabit Commit)
-# Not: Llama.cpp yerine Whisper.cpp kullanıyoruz.
+# 4. whisper.cpp'yi Klonla
 ARG WHISPER_CPP_VERSION=v1.7.1
 RUN git clone https://github.com/ggerganov/whisper.cpp.git whisper.cpp && \
     cd whisper.cpp && \
@@ -39,6 +38,14 @@ RUN cmake -B build \
     -DWHISPER_BUILD_EXAMPLES=OFF
 RUN cmake --build build --target all -j $(nproc)
 
+# --- DÜZELTME ADIMI: Artifact Toplama ---
+# Dağınık dosyaları tek bir 'dist' klasöründe topluyoruz.
+RUN mkdir -p /app/dist/bin /app/dist/lib && \
+    # Executable dosyaları bul ve taşı
+    find /app/build -maxdepth 1 -type f -executable -name "stt_*" -exec cp {} /app/dist/bin/ \; && \
+    # Whisper shared library'leri bul ve taşı (varsa)
+    find /app/build -name "*.so*" -exec cp {} /app/dist/lib/ \; || true
+
 # --- Çalışma Aşaması ---
 FROM ubuntu:24.04 AS runtime
 
@@ -46,18 +53,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libgomp1 curl libsndfile1 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/build/stt_service /usr/local/bin/
-COPY --from=builder /app/build/stt_cli /usr/local/bin/
+# Executable'ları kopyala
+COPY --from=builder /app/dist/bin/* /usr/local/bin/
 
-# Paylaşılan kütüphaneleri taşı
+# Kütüphaneleri kopyala (vcpkg + local)
 COPY --from=builder /app/vcpkg_installed/x64-linux/lib/*.so* /usr/local/lib/
-COPY --from=builder /app/build/bin/*.so /usr/local/lib/
+COPY --from=builder /app/dist/lib/*.so* /usr/local/lib/
 RUN ldconfig
 
 WORKDIR /app
 RUN mkdir -p /models
 
-# STT Servisi Portları (Eski Python servisi ile aynı)
+# STT Servisi Portları
 EXPOSE 15030 15031
 
 CMD ["stt_service"]
