@@ -1,125 +1,191 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sentiric Omni-Studio | STT Engine</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sentiric Omni-Studio | AI Terminal</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💠</text></svg>">
+    
+    <!-- Fontlar ve İkonlar -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- Highlight.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    
+    <!-- Markdown Parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="layout">
-        <!-- Sidebar -->
-        <aside>
+
+<div class="app-container">
+    
+    <!-- SOL PANEL: AYARLAR -->
+    <nav class="sidebar" id="settingsPanel">
+        <div class="sidebar-header">
             <div class="brand">
-                <i class="fas fa-wave-square"></i>
-                <span>Sentiric STT</span>
-                <span class="badge">v2.0 C++</span>
+                <i class="fas fa-cube fa-spin-pulse" style="--fa-animation-duration: 3s;"></i>
+                <span>SENTIRIC</span>
+                <span class="badge">v4.0</span>
             </div>
-            
-            <div class="status-panel">
-                <div class="status-row">
-                    <span>Status</span>
-                    <span id="statusIndicator" class="status-dot">Connecting...</span>
+        </div>
+
+        <div class="sidebar-content">
+            <div class="group">
+                <label class="group-label">Sistem Kimliği (System Prompt)</label>
+                <textarea id="systemPrompt" rows="5" placeholder="AI'nın kişiliğini tanımlayın..."></textarea>
+            </div>
+
+            <div class="group">
+                <label class="group-label">Model Parametreleri</label>
+                
+                <div class="control-row">
+                    <span>Sıcaklık (Temp)</span>
+                    <span id="valTemp">0.8</span>
                 </div>
-                <div class="status-row">
-                    <span>Backend</span>
-                    <span class="val">Whisper.cpp</span>
+                <input type="range" id="rngTemp" min="0" max="1.5" step="0.1" value="0.8">
+
+                <div class="control-row">
+                    <span>Maks. Token</span>
+                    <span id="valTokens">2048</span>
                 </div>
-                <div class="status-row">
-                    <span>Protocol</span>
-                    <span class="val">REST / gRPC</span>
-                </div>
+                <input type="range" id="rngTokens" min="128" max="8192" step="128" value="2048">
             </div>
 
-            <div class="divider"></div>
-
-            <div class="settings">
-                <label>Target Language</label>
-                <select id="langSelect">
-                    <option value="">Auto Detect</option>
-                    <option value="tr">Turkish (Türkçe)</option>
-                    <option value="en">English</option>
-                    <option value="es">Spanish</option>
-                    <option value="de">German</option>
-                    <option value="fr">French</option>
-                </select>
-            </div>
-        </aside>
-
-        <!-- Main Content -->
-        <main>
-            <!-- Visualization Area -->
-            <div class="visualizer-card">
-                <canvas id="visualizer"></canvas>
-                <div class="timer" id="recordTimer">00:00.00</div>
-            </div>
-
-            <!-- Controls -->
-            <div class="action-bar">
-                <!-- YENİ: Hands-Free Modu Switch'i -->
-                <div class="toggle-container">
+            <div class="group">
+                <label class="group-label">Ses & Dil</label>
+                <div class="toggle-row">
+                    <span>TTS (Sesli Okuma)</span>
                     <label class="switch">
-                        <input type="checkbox" id="handsFreeToggle">
+                        <input type="checkbox" id="chkTTS">
                         <span class="slider"></span>
                     </label>
-                    <span class="toggle-label">Hands-Free Mode</span>
                 </div>
+                <select id="selLang" class="select-box">
+                    <option value="tr-TR">🇹🇷 Türkçe</option>
+                    <option value="en-US">🇺🇸 English</option>
+                </select>
+            </div>
+        </div>
 
-                <button id="recordBtn" class="btn btn-primary">
-                    <i class="fas fa-microphone"></i> Start Recording
-                </button>
-                <input type="file" id="fileInput" accept=".wav,.mp3,.m4a" hidden>
-                <button id="uploadBtn" class="btn btn-secondary">
-                    <i class="fas fa-upload"></i> Upload File
-                </button>
+        <div class="sidebar-footer">
+            <div class="connection-status" id="connStatus">
+                <div class="indicator"></div>
+                <span id="connText">Bağlanıyor...</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ORTA PANEL: CHAT & VISUALIZER -->
+    <main class="stage">
+        <!-- Header -->
+        <header class="stage-header">
+            <button class="icon-btn" onclick="app.ui.toggleSidebar('settingsPanel')">
+                <i class="fas fa-bars"></i>
+            </button>
+            
+            <div class="model-display">
+                <span class="model-name">LLAMA SERVICE</span>
+                <span class="model-meta" id="modelMeta">--</span>
             </div>
 
-            <!-- Results Area -->
-            <div class="results-grid">
-                <!-- Transcription -->
-                <div class="card full-height">
-                    <div class="card-header">
-                        <h3><i class="fas fa-align-left"></i> Transcription</h3>
-                        <div class="actions">
-                            <button onclick="copyText()"><i class="fas fa-copy"></i></button>
-                        </div>
-                    </div>
-                    <div class="output-area" id="output">
-                        <div class="placeholder">Ready to process audio...</div>
-                    </div>
-                </div>
+            <button class="icon-btn" onclick="app.ui.toggleSidebar('ragPanel')">
+                <i class="fas fa-database"></i>
+            </button>
+        </header>
 
-                <!-- Metrics & JSON -->
-                <div class="right-column">
-                    <!-- Performance Cards -->
-                    <div class="metrics-row">
-                        <div class="metric-card">
-                            <label>Audio Duration</label>
-                            <div class="value" id="metaDuration">--</div>
-                        </div>
-                        <div class="metric-card">
-                            <label>Process Time</label>
-                            <div class="value" id="metaProcess">--</div>
-                        </div>
-                        <div class="metric-card highlight">
-                            <label>Speed (RTF)</label>
-                            <div class="value" id="metaSpeed">--</div>
-                        </div>
-                    </div>
+        <!-- Chat Alanı -->
+        <div id="chatHistory" class="chat-history">
+            <div class="empty-state">
+                <div class="empty-logo">💠</div>
+                <h1>Sentiric Engine</h1>
+                <p>Yüksek performanslı yerel yapay zeka motoru.</p>
+            </div>
+        </div>
 
-                    <!-- JSON Response -->
-                    <div class="card json-card">
-                        <div class="card-header">
-                            <h3><i class="fas fa-code"></i> Payload Inspector</h3>
-                        </div>
-                        <pre id="jsonOutput" class="json-area">{}</pre>
-                    </div>
+        <!-- Alt Kontrol Alanı (Dock) -->
+        <div class="control-dock">
+            
+            <!-- Canlı Bilgi Çubuğu -->
+            <div class="telemetry-bar">
+                <div class="stat-item"><i class="fas fa-bolt"></i> <span id="statTPS">--</span> t/s</div>
+                <div class="stat-item"><i class="fas fa-clock"></i> <span id="statLatency">--</span> ms</div>
+                <div id="recordingIndicator" class="rec-indicator hidden">
+                    <div class="rec-dot"></div> DİNLİYOR...
                 </div>
             </div>
-        </main>
-    </div>
-    <script src="app.js"></script>
+
+            <!-- Input Kapsülü -->
+            <div class="input-capsule">
+                <!-- Ses Dalgası Canvas -->
+                <canvas id="waveCanvas" width="120" height="40" class="wave-canvas hidden"></canvas>
+
+                <!-- Dosya Yükleme -->
+                <input type="file" id="fileInput" hidden>
+                <button class="dock-btn" onclick="document.getElementById('fileInput').click()">
+                    <i class="fas fa-paperclip"></i>
+                </button>
+
+                <!-- Text Input -->
+                <div class="text-area-wrapper">
+                    <textarea id="userInput" rows="1" placeholder="Bir şeyler yazın..."></textarea>
+                    <!-- Ghost Text (Ses tanıma önizlemesi için) -->
+                    <div id="ghostText" class="ghost-text"></div>
+                </div>
+
+                <!-- Mikrofon / Hands-Free -->
+                <button class="dock-btn" id="btnMic">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                
+                <button class="dock-btn" id="btnLive">
+                    <i class="fas fa-headset"></i>
+                </button>
+
+                <!-- Gönder -->
+                <button class="send-btn" id="btnSend">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+                
+                <button class="stop-btn hidden" id="btnStop">
+                    <i class="fas fa-stop"></i>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- SAĞ PANEL: RAG & LOGS -->
+    <nav class="sidebar right" id="ragPanel">
+        <div class="sidebar-header">
+            <span class="sidebar-title">BAĞLAM & VERİ</span>
+        </div>
+        <div class="sidebar-content">
+            <div class="group">
+                <label class="group-label">RAG Context (Bilgi Bankası)</label>
+                <textarea id="ragContext" class="code-area" rows="15" placeholder="AI'nın kullanmasını istediğiniz doküman içeriği..."></textarea>
+                <div class="char-count">Karakter: <span id="ragCount">0</span></div>
+            </div>
+            
+            <div class="group">
+                <label class="group-label">Son Yanıt JSON</label>
+                <pre id="jsonLog" class="json-log">{}</pre>
+            </div>
+        </div>
+        <div class="sidebar-footer">
+            <button class="outline-btn" onclick="app.chat.clearHistory()">
+                <i class="fas fa-trash"></i> Sohbeti Temizle
+            </button>
+        </div>
+    </nav>
+
+</div>
+
+<!-- Glass Overlay (Mobile) -->
+<div class="overlay" id="uiOverlay" onclick="app.ui.closeAll()"></div>
+
+<script src="app.js"></script>
 </body>
 </html>
