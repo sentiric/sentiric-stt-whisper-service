@@ -1,5 +1,7 @@
 # 🤫 Sentiric STT Whisper Service (C++ Edition)
 
+[![CI - Build and Push Docker Image](https://github.com/sentiric/sentiric-llm-llama-service/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/sentiric/sentiric-llm-llama-service/actions/workflows/build-and-push.yml)
+
 **Sentiric STT Whisper Service**, OpenAI'ın Whisper modelini kullanan, yüksek performanslı, düşük gecikmeli ve kaynak dostu bir **C++ Mikroservisidir**.
 
 Bu proje, önceki Python tabanlı servisin **v2.0.0 (Native)** sürümü olarak, `whisper.cpp` motoru üzerine yeniden inşa edilmiştir.
