@@ -5,6 +5,7 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
+#include <iomanip> // HEX dump için gerekli
 
 using json = nlohmann::json;
 
@@ -29,6 +30,17 @@ std::string clean_utf8(const std::string& str) {
         if (valid) { res.append(str, i, n); i += n; } else { i++; }
     }
     return res;
+}
+
+// Helper: Hex Dump (Debugging için)
+std::string hex_dump(const void* data, size_t size) {
+    const unsigned char* p = static_cast<const unsigned char*>(data);
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
+    for (size_t i = 0; i < size; ++i) {
+        ss << std::setw(2) << static_cast<int>(p[i]) << " ";
+    }
+    return ss.str();
 }
 
 // --- MetricsServer Implementation ---
@@ -72,7 +84,7 @@ void HttpServer::setup_routes() {
             {"status", ready ? "healthy" : "unhealthy"},
             {"model_ready", ready},
             {"service", "sentiric-stt-whisper-service"},
-            {"version", "2.2.2"}, // Patch Bump for Pro UI
+            {"version", "2.2.3"}, // Patch Bump for Robust WAV Parsing
             {"api_compatibility", "openai-whisper"}
         };
         res.set_header("Access-Control-Allow-Origin", "*");
@@ -98,9 +110,7 @@ void HttpServer::setup_routes() {
 
         const auto& file = req.get_file_value("file");
         
-        // --- Request Options Parsing ---
         RequestOptions opts;
-        
         if (req.has_file("language")) opts.language = req.get_file_value("language").content;
         if (req.has_file("prompt")) opts.prompt = req.get_file_value("prompt").content;
         
@@ -118,10 +128,8 @@ void HttpServer::setup_routes() {
             std::string val = req.get_file_value("diarization").content;
             opts.enable_diarization = (val == "true" || val == "1");
         }
-        // -------------------------------
 
-        spdlog::info("🎤 Processing: {}b | Lang: {} | Temp: {:.1f} | Beam: {} | Trans: {} | Diar: {}", 
-            file.content.size(), opts.language, opts.temperature, opts.beam_size, opts.translate, opts.enable_diarization);
+        spdlog::info("🎤 Processing: {}b | Lang: {} | Temp: {:.1f}", file.content.size(), opts.language, opts.temperature);
 
         try {
             auto start_time = std::chrono::steady_clock::now();
@@ -129,7 +137,7 @@ void HttpServer::setup_routes() {
             DecodedAudio audio = parse_wav_robust(file.content);
             
             if (audio.pcm_data.empty()) {
-                throw std::runtime_error("Invalid or empty WAV file.");
+                throw std::runtime_error("Parsed WAV data is empty.");
             }
 
             auto results = engine_->transcribe_pcm16(
@@ -183,19 +191,19 @@ void HttpServer::setup_routes() {
                     {"processing_time", processing_time.count()},
                     {"rtf", processing_time.count() / (duration > 0 ? duration : 1.0)},
                     {"input_sr", audio.sample_rate},
-                    {"params", {
-                        {"temperature", opts.temperature},
-                        {"beam_size", opts.beam_size},
-                        {"translate", opts.translate}
-                    }}
+                    {"input_channels", audio.channels}
                 }}
             };
 
-            spdlog::info("✅ Transcribed: {:.2f}s audio in {:.2f}s", duration, processing_time.count());
             res.set_content(response.dump(), "application/json");
 
         } catch (const std::exception& e) {
             spdlog::error("Transcription error: {}", e.what());
+            // HATA ANINDA HEX DUMP BAS (İlk 64 byte)
+            if (file.content.size() > 0) {
+                size_t dump_size = std::min((size_t)64, file.content.size());
+                spdlog::error("WAV Header Dump (First {} bytes): {}", dump_size, hex_dump(file.content.data(), dump_size));
+            }
             res.status = 500;
             res.set_content(json{{"error", e.what()}}.dump(), "application/json");
         }
@@ -207,67 +215,83 @@ void HttpServer::setup_routes() {
 
 DecodedAudio HttpServer::parse_wav_robust(const std::string& bytes) {
     DecodedAudio result;
-    if (bytes.size() < 44) return result;
+    if (bytes.size() < 44) throw std::runtime_error("WAV too small (<44 bytes)");
 
     const uint8_t* data = reinterpret_cast<const uint8_t*>(bytes.data());
     size_t ptr = 0;
 
-    if (memcmp(data + ptr, "RIFF", 4) != 0) throw std::runtime_error("Invalid WAV: No RIFF header");
-    ptr += 8;
-    if (memcmp(data + ptr, "WAVE", 4) != 0) throw std::runtime_error("Invalid WAV: No WAVE header");
+    // Header Check
+    if (std::memcmp(data + ptr, "RIFF", 4) != 0) throw std::runtime_error("Invalid WAV: No RIFF");
+    ptr += 8; // Skip RIFF + Size
+    if (std::memcmp(data + ptr, "WAVE", 4) != 0) throw std::runtime_error("Invalid WAV: No WAVE");
     ptr += 4;
 
-    int16_t bits_per_sample = 0;
     const uint8_t* pcm_start = nullptr;
     size_t pcm_size_bytes = 0;
+    int16_t bits_per_sample = 0;
+    bool fmt_found = false;
 
     while (ptr + 8 < bytes.size()) {
         char chunk_id[5] = {0};
-        memcpy(chunk_id, data + ptr, 4);
+        std::memcpy(chunk_id, data + ptr, 4);
         ptr += 4;
 
         uint32_t chunk_size;
-        memcpy(&chunk_size, data + ptr, 4);
+        std::memcpy(&chunk_size, data + ptr, 4);
         ptr += 4;
 
-        if (strcmp(chunk_id, "fmt ") == 0) {
-            if (chunk_size < 16) throw std::runtime_error("Invalid fmt chunk");
+        // Debug Log
+        // spdlog::debug("WAV Chunk Found: ID='{}' Size={}", chunk_id, chunk_size);
+
+        if (std::memcmp(chunk_id, "fmt ", 4) == 0) {
+            if (chunk_size < 16) {
+                spdlog::error("Invalid fmt chunk size: {}", chunk_size);
+                throw std::runtime_error("Invalid fmt chunk size (must be >= 16)");
+            }
+            
             uint16_t format_tag;
-            memcpy(&format_tag, data + ptr, 2);
-            if (format_tag != 1 && format_tag != 0xFFFE) { 
-                throw std::runtime_error("Unsupported WAV format (Non-PCM)");
+            std::memcpy(&format_tag, data + ptr, 2);
+            if (format_tag != 1 && format_tag != 0xFFFE) {
+                throw std::runtime_error("Unsupported format_tag: " + std::to_string(format_tag));
             }
 
-            uint16_t channels;
-            memcpy(&channels, data + ptr + 2, 2);
-            result.channels = channels;
-
-            uint32_t sample_rate;
-            memcpy(&sample_rate, data + ptr + 4, 4);
-            result.sample_rate = sample_rate;
-
-            memcpy(&bits_per_sample, data + ptr + 14, 2);
+            std::memcpy(&result.channels, data + ptr + 2, 2);
+            std::memcpy(&result.sample_rate, data + ptr + 4, 4);
+            std::memcpy(&bits_per_sample, data + ptr + 14, 2);
+            
+            fmt_found = true;
             ptr += chunk_size;
         } 
-        else if (strcmp(chunk_id, "data") == 0) {
+        else if (std::memcmp(chunk_id, "data", 4) == 0) {
+            if (!fmt_found) throw std::runtime_error("Found data chunk before fmt chunk");
+            
             pcm_start = data + ptr;
             pcm_size_bytes = chunk_size;
-            ptr += chunk_size;
+            // Veri bulundu, daha fazla okumaya gerek yok (ya da meta data için okunabilir)
             break; 
         } 
         else {
+            // Bilinmeyen chunk'ı atla
             ptr += chunk_size;
         }
 
+        // Padding byte
         if (chunk_size % 2 != 0) ptr++;
     }
 
     if (!pcm_start || pcm_size_bytes == 0) {
-        throw std::runtime_error("No 'data' chunk found in WAV");
+        throw std::runtime_error("No 'data' chunk found or empty");
     }
 
     if (bits_per_sample != 16) {
         throw std::runtime_error("Unsupported bit depth: " + std::to_string(bits_per_sample));
+    }
+
+    // Güvenlik: Veri boyutu, string boyutunu aşıyor mu?
+    size_t remaining = bytes.size() - (pcm_start - data);
+    if (pcm_size_bytes > remaining) {
+        spdlog::warn("WAV data chunk size ({}) > remaining bytes ({})! Truncating.", pcm_size_bytes, remaining);
+        pcm_size_bytes = remaining;
     }
 
     size_t num_samples = pcm_size_bytes / 2;
@@ -280,11 +304,13 @@ DecodedAudio HttpServer::parse_wav_robust(const std::string& bytes) {
         size_t frames = num_samples / 2;
         result.pcm_data.resize(frames);
         for (size_t i = 0; i < frames; ++i) {
+            // Stereo -> Mono (Average)
             int32_t mixed = (int32_t)raw_samples[i*2] + (int32_t)raw_samples[i*2 + 1];
             result.pcm_data[i] = static_cast<int16_t>(mixed / 2);
         }
     } 
     else {
+        // Multichannel -> First channel only
         size_t frames = num_samples / result.channels;
         result.pcm_data.resize(frames);
         for (size_t i = 0; i < frames; ++i) {

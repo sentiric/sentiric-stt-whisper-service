@@ -28,16 +28,14 @@ grpc::Status GrpcServer::WhisperTranscribe(
     std::vector<int16_t> pcm16(audio_data.size() / 2);
     std::memcpy(pcm16.data(), audio_data.data(), audio_data.size());
 
-    // --- FIX: RequestOptions Hazırlığı ---
+    // --- FIX: RequestOptions Mapping ---
     RequestOptions options;
     if (request->has_language()) {
         options.language = request->language();
     }
-    // Gelecekte gRPC proto'ya temperature vb. eklenirse buraya maplenecek.
-    // Şimdilik varsayılan (default) ayarları kullanıyoruz.
-    // -------------------------------------
+    // Gelecekte gRPC proto'ya temperature vb. eklendiğinde buraya maplenecek.
+    // -----------------------------------
 
-    // Motoru yeni imza ile çağır
     auto results = engine_->transcribe_pcm16(pcm16, 16000, options);
 
     std::string full_text;
@@ -97,11 +95,10 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
         return grpc::Status::CANCELLED;
     }
 
-    // --- FIX: RequestOptions Hazırlığı ---
+    // --- FIX: RequestOptions Mapping ---
     RequestOptions options;
-    // Streaming modunda dil genellikle "auto" bırakılır veya ilk pakette gönderilir.
-    // Şimdilik varsayılanları kullanıyoruz.
-    // -------------------------------------
+    // Streaming için varsayılan ayarlar
+    // -----------------------------------
 
     auto results = engine_->transcribe_pcm16(full_pcm_buffer, 16000, options);
 
