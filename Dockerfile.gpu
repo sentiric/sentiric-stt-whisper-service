@@ -1,7 +1,7 @@
-# --- Derleme Aşaması (GPU) ---
+# --- Derleme Aşaması (NVIDIA Devel) ---
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
 
-ENV DEBIAN_FRONTEND=noninteractive
+# 1. Temel bağımlılıklar
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git cmake build-essential curl zip unzip tar \
     pkg-config ninja-build ca-certificates python3 \
@@ -21,8 +21,8 @@ WORKDIR /app
 COPY vcpkg.json .
 RUN /opt/vcpkg/vcpkg install --triplet x64-linux
 
-# 4. Whisper.cpp Klonla
-ARG WHISPER_CPP_VERSION=v1.7.1
+# 4. whisper.cpp'yi Klonla (GÜNCELLENDİ: v1.8.2)
+ARG WHISPER_CPP_VERSION=v1.8.2
 RUN git clone https://github.com/ggerganov/whisper.cpp.git whisper.cpp && \
     cd whisper.cpp && \
     git checkout ${WHISPER_CPP_VERSION}
@@ -31,25 +31,26 @@ RUN git clone https://github.com/ggerganov/whisper.cpp.git whisper.cpp && \
 COPY src ./src
 COPY CMakeLists.txt .
 
-# 6. Projeyi Derle (CUDA AKTİF)
+# 6. Projeyi Derle (GPU Optimizasyonlu)
+# -DGGML_CUDA=1: GPU desteğini açar.
+# v1.8.2 ile Flash Attention varsayılan olarak gelir, CUDA varsa aktif olur.
 RUN cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
     -DWHISPER_BUILD_TESTS=OFF \
     -DWHISPER_BUILD_EXAMPLES=OFF \
-    -DGGML_CUDA=ON
+    -DGGML_CUDA=1
     
 RUN cmake --build build --target all -j $(nproc)
 
-# --- DÜZELTME ADIMI: Artifact Toplama ---
+# Artifact Toplama
 RUN mkdir -p /app/dist/bin /app/dist/lib && \
     find /app/build -maxdepth 1 -type f -executable -name "stt_*" -exec cp {} /app/dist/bin/ \; && \
     find /app/build -name "*.so*" -exec cp {} /app/dist/lib/ \; || true
 
-# --- Çalışma Aşaması (Runtime) ---
+# --- Çalışma Aşaması (NVIDIA Runtime) ---
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
 
-ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libgomp1 curl libsndfile1 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -57,17 +58,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Executable'ları kopyala
 COPY --from=builder /app/dist/bin/* /usr/local/bin/
 
-# Kütüphaneleri kopyala
+# Kütüphaneleri kopyala (vcpkg + local + cuda deps)
 COPY --from=builder /app/vcpkg_installed/x64-linux/lib/*.so* /usr/local/lib/
 COPY --from=builder /app/dist/lib/*.so* /usr/local/lib/
 RUN ldconfig
 
-# UI Dosyalarını Kopyala (YENİ)
+# UI ve Script Dosyalarını Kopyala
 COPY studio /app/studio
+COPY scripts /app/scripts
 
 WORKDIR /app
 RUN mkdir -p /models
 
-EXPOSE 15030 15031
+# GPU Ortam Değişkenleri
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+EXPOSE 15030 15031 15032
 
 CMD ["stt_service"]
