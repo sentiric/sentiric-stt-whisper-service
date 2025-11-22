@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "stt-whisper-service-deps",
+  "version-string": "2.0.0",
+  "dependencies": [
+    "grpc",
+    "protobuf",
+    "spdlog",
+    "nlohmann-json",
+    "cpp-httplib",
+    "prometheus-cpp",
+    "libsamplerate" 
+  ]
+}

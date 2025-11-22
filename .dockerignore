@@ -1,0 +1,15 @@
+.git
+.github
+.vscode
+.idea
+build/
+temp/
+*.log
+*.md
+!README.md
+!docs/
+docker-compose.*
+Dockerfile*
+LICENSE
+vcpkg_installed/
+models/
