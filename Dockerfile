@@ -57,7 +57,7 @@ COPY --from=builder /app/dist/lib/*.so* /usr/local/lib/
 RUN ldconfig
 
 COPY studio /app/studio
-COPY scripts /app/scripts 
+# COPY scripts /app/scripts 
 
 WORKDIR /app
 RUN mkdir -p /models

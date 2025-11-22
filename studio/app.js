@@ -12,26 +12,23 @@ const state = {
     processor: null,
     visualizerFrame: null,
     
-    // VAD Settings
     silenceThreshold: 0.02,
     silenceStart: null,
     isSpeaking: false,
-    minDuration: 1500, // ms
-    silenceDuration: 2500, // ms
+    minDuration: 1000, 
+    silenceDuration: 2000, 
     recordingStartTime: 0,
     
-    // Recording Buffer
     recordedChunks: []
 };
 
 // ==========================================
-// 2. AUDIO ENGINE (VAD + Visualizer + Recording)
+// 2. AUDIO ENGINE
 // ==========================================
 const AudioEngine = {
     async init() {
         try {
-            state.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
-            // Kullanıcı etkileşimi olmadan suspended başlarsa resume et
+            state.audioContext = new (window.AudioContext || window.webkitAudioContext)(); // SampleRate otomatiğe bırakıldı
             if (state.audioContext.state === 'suspended') await state.audioContext.resume();
             
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -40,12 +37,11 @@ const AudioEngine = {
             state.analyser = state.audioContext.createAnalyser();
             state.analyser.fftSize = 256;
             
-            // VAD Processor
             state.processor = state.audioContext.createScriptProcessor(4096, 1, 1);
             
             state.microphone.connect(state.analyser);
             state.analyser.connect(state.processor);
-            state.processor.connect(state.audioContext.destination); // Pipeline tamamla
+            state.processor.connect(state.audioContext.destination);
             
             state.processor.onaudioprocess = AudioEngine.processAudio;
             
@@ -55,33 +51,27 @@ const AudioEngine = {
         } catch (e) {
             ui.updateStatus("Mikrofon Hatası!");
             console.error(e);
-            alert("Mikrofon erişimi reddedildi veya desteklenmiyor.");
+            alert("Mikrofon erişimi reddedildi.");
         }
     },
 
     processAudio(e) {
         const inputData = e.inputBuffer.getChannelData(0);
         
-        // 1. Visualizer için RMS hesapla
         let sum = 0;
         for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
         const rms = Math.sqrt(sum / inputData.length);
         
-        // UI Güncelleme (VAD Bar)
         ui.updateVadMeter(rms);
 
-        // 2. Eğer kayıt yapmıyorsak işlemeyi durdur (Hands-Free kapalıysa)
         if (!state.isRecording && !state.isHandsFree) return;
 
-        // 3. Kayıt Buffer'ına Ekle (Sadece aktif kayıt sırasında)
         if (state.isRecording) {
             state.recordedChunks.push(AudioEngine.floatTo16BitPCM(inputData));
         }
 
-        // 4. Hands-Free VAD Mantığı
         if (state.isHandsFree) {
             if (rms > state.silenceThreshold) {
-                // Konuşma algılandı
                 state.silenceStart = null;
                 if (!state.isSpeaking) {
                     state.isSpeaking = true;
@@ -89,10 +79,8 @@ const AudioEngine = {
                     if (!state.isRecording) AudioEngine.startRecording();
                 }
             } else if (state.isSpeaking) {
-                // Sessizlik başladı
                 if (!state.silenceStart) state.silenceStart = Date.now();
                 else if (Date.now() - state.silenceStart > state.silenceDuration) {
-                    // Yeterince uzun süre sessiz kalındı -> Durdur ve Gönder
                     console.log("🤫 Sessizlik algılandı. Gönderiliyor...");
                     AudioEngine.stopRecording();
                 }
@@ -119,7 +107,6 @@ const AudioEngine = {
         state.isSpeaking = false;
         ui.setRecordingState(false);
 
-        // Çok kısa kayıtları filtrele (Tıklama sesi vb.)
         if (duration < state.minDuration) {
             console.warn(`⚠️ Kayıt çok kısa (${duration}ms). İptal edildi.`);
             return;
@@ -129,7 +116,6 @@ const AudioEngine = {
         await NetworkEngine.upload(wavBlob, duration);
     },
 
-    // PCM Helper
     floatTo16BitPCM(input) {
         const output = new Int16Array(input.length);
         for (let i = 0; i < input.length; i++) {
@@ -148,17 +134,14 @@ const AudioEngine = {
             offset += chunk.length;
         }
         
-        // WAV Header
         const buffer = new ArrayBuffer(44 + result.length * 2);
         const view = new DataView(buffer);
         const sampleRate = state.audioContext.sampleRate;
         
-        // RIFF chunk
-        view.setUint32(0, 0x52494646, false); // 'RIFF'
+        view.setUint32(0, 0x52494646, false); 
         view.setUint32(4, 36 + result.length * 2, true);
-        view.setUint32(8, 0x57415645, false); // 'WAVE'
-        // fmt sub-chunk
-        view.setUint32(12, 0x666d7420, false); // 'fmt '
+        view.setUint32(8, 0x57415645, false); 
+        view.setUint32(12, 0x666d7420, false); 
         view.setUint32(16, 16, true); 
         view.setUint16(20, 1, true); 
         view.setUint16(22, 1, true); 
@@ -166,11 +149,9 @@ const AudioEngine = {
         view.setUint32(28, sampleRate * 2, true);
         view.setUint16(32, 2, true);
         view.setUint16(34, 16, true);
-        // data sub-chunk
-        view.setUint32(36, 0x64617461, false); // 'data'
+        view.setUint32(36, 0x64617461, false); 
         view.setUint32(40, result.length * 2, true);
 
-        // PCM Data
         const pcmView = new Int16Array(buffer, 44);
         pcmView.set(result);
 
@@ -179,7 +160,7 @@ const AudioEngine = {
 };
 
 // ==========================================
-// 3. NETWORK ENGINE (Backend API)
+// 3. NETWORK ENGINE
 // ==========================================
 const NetworkEngine = {
     async upload(blob, durationMs) {
@@ -189,12 +170,14 @@ const NetworkEngine = {
         const lang = $('langSelect').value;
         if (lang !== 'auto') formData.append('language', lang);
 
-        // YENİ: Prompt Ekleme
-        const prompt = $('promptInput').value.trim();
+        const prompt = $('promptInput') ? $('promptInput').value.trim() : "";
         if (prompt) formData.append('prompt', prompt);
 
-        // UI Placeholder ekle
-        const segmentId = ui.addSegment('Transkribe ediliyor...', durationMs);
+        // YENİ: Blob URL oluştur (Playback için)
+        const audioUrl = URL.createObjectURL(blob);
+
+        // UI Placeholder (Audio URL ile birlikte)
+        const segmentId = ui.addSegment('Transkribe ediliyor...', durationMs, audioUrl);
         
         try {
             const startTime = Date.now();
@@ -203,12 +186,21 @@ const NetworkEngine = {
                 body: formData
             });
             const processTime = Date.now() - startTime;
-            
             const data = await res.json();
             
             if (res.ok) {
                 ui.updateSegment(segmentId, data.text, data);
                 ui.updateDashboard(durationMs, processTime, data);
+                
+                // Diarization Visualization
+                if (data.segments) {
+                    data.segments.forEach(seg => {
+                        if (seg.speaker_turn_next) {
+                            ui.addSpeakerChangeInfo(segmentId);
+                        }
+                    });
+                }
+
             } else {
                 ui.updateSegment(segmentId, `❌ Hata: ${data.error}`, null, true);
             }
@@ -233,9 +225,8 @@ const NetworkEngine = {
 // ==========================================
 const ui = {
     init() {
-        // Event Listeners
         $('recordBtn').onclick = () => {
-            if (state.isHandsFree) return; // Hands-free modunda manuel buton çalışmaz
+            if (state.isHandsFree) return; 
             if (state.isRecording) AudioEngine.stopRecording();
             else AudioEngine.startRecording();
         };
@@ -249,20 +240,21 @@ const ui = {
         $('vadRange').oninput = (e) => {
             state.silenceThreshold = parseFloat(e.target.value);
             $('vadVal').innerText = state.silenceThreshold;
-            // Threshold çizgisini güncelle (0.1 max scale varsayımıyla)
             const pct = (state.silenceThreshold / 0.1) * 100;
             $('vadThresholdLine').style.left = `${pct}%`;
         };
 
         $('fileInput').onchange = (e) => {
-            if (e.target.files[0]) NetworkEngine.upload(e.target.files[0], 0);
+            if (e.target.files[0]) {
+                // Dosya yüklemelerinde de audio player için URL oluştur
+                // Ancak NetworkEngine.upload zaten Blob alıyor, file bir blob'dur.
+                NetworkEngine.upload(e.target.files[0], 0);
+            }
         };
 
-        // Theme Init
         const theme = localStorage.getItem('theme') || 'dark';
         document.body.setAttribute('data-theme', theme);
 
-        // Audio Init (İlk tıklamada)
         document.body.addEventListener('click', () => {
             if (!state.audioContext) AudioEngine.init();
         }, { once: true });
@@ -278,14 +270,11 @@ const ui = {
     },
 
     updateVadMeter(rms) {
-        // Logaritmik skala daha doğal görünür
         const val = Math.min(rms * 1000, 100); 
         $('vadLevel').style.width = `${val}%`;
     },
 
-    setVadStatus(text) {
-        $('vadStatus').innerText = text;
-    },
+    setVadStatus(text) { $('vadStatus').innerText = text; },
 
     setRecordingState(isRecording) {
         const btn = $('recordBtn');
@@ -300,9 +289,7 @@ const ui = {
         }
     },
 
-    updateStatus(text) {
-        $('mainStatus').innerText = text;
-    },
+    updateStatus(text) { $('mainStatus').innerText = text; },
 
     setConnectionStatus(isOnline) {
         const el = $('connStatus').querySelector('.indicator');
@@ -344,34 +331,39 @@ const ui = {
             for (let i = 0; i < dataArray.length; i++) {
                 const v = dataArray[i] / 128.0;
                 const y = v * h / 2;
-
                 if (i === 0) ctx.moveTo(x, y);
                 else ctx.lineTo(x, y);
-
                 x += sliceWidth;
             }
-
             ctx.lineTo(w, h / 2);
             ctx.stroke();
         };
         draw();
     },
 
-    addSegment(text, durationMs) {
+    // YENİ: Audio URL parametresi eklendi
+    addSegment(text, durationMs, audioUrl = null) {
         const id = 'seg-' + Date.now();
         const container = $('transcriptHistory');
         
-        // Eğer empty state varsa kaldır
         if (container.querySelector('.empty-state')) container.innerHTML = '';
 
         const timeStr = new Date().toLocaleTimeString();
         const div = document.createElement('div');
         div.className = 'segment';
         div.id = id;
+        
+        // Audio player HTML (Varsa)
+        let audioHtml = '';
+        if (audioUrl) {
+            audioHtml = `<audio class="audio-player" src="${audioUrl}" controls></audio>`;
+        }
+
         div.innerHTML = `
             <div class="time">${timeStr}</div>
             <div class="bubble">
                 <div class="content">${text}</div>
+                ${audioHtml}
                 <div class="meta">
                     <span class="tag"><i class="fas fa-clock"></i> ${durationMs > 0 ? (durationMs/1000).toFixed(1)+'s' : '...'}</span>
                     <span class="tag prob-tag">...</span>
@@ -384,6 +376,18 @@ const ui = {
         return id;
     },
 
+    // YENİ: Konuşmacı değişikliği ekleme
+    addSpeakerChangeInfo(segmentId) {
+        const seg = document.getElementById(segmentId);
+        if (seg) {
+            const changeDiv = document.createElement('div');
+            changeDiv.className = 'speaker-change';
+            changeDiv.innerHTML = '🗣️ KONUŞMACI DEĞİŞİMİ';
+            // Segmentten sonraya ekle
+            seg.parentNode.insertBefore(changeDiv, seg.nextSibling);
+        }
+    },
+
     updateSegment(id, text, data, isError = false) {
         const el = document.getElementById(id);
         if (!el) return;
@@ -393,9 +397,7 @@ const ui = {
         if (isError) content.style.color = 'var(--danger)';
 
         if (data) {
-            // Güven skorunu göster
             let prob = 0;
-            // Segmentlerin ortalamasını al veya ilk segmenti kullan
             if (data.segments && data.segments.length > 0) {
                 prob = data.segments[0].probability;
             }
@@ -430,5 +432,4 @@ const ui = {
     }
 };
 
-// Start
 ui.init();

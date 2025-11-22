@@ -65,7 +65,7 @@ RUN ldconfig
 
 # UI ve Script Dosyalarını Kopyala
 COPY studio /app/studio
-COPY scripts /app/scripts
+# COPY scripts /app/scripts
 
 WORKDIR /app
 RUN mkdir -p /models
