@@ -8,32 +8,33 @@ let processor;
 let startTime;
 let timerInterval;
 
-// Hands-Free State
+// Hands-Free State & VAD Settings
 let isHandsFree = false;
 let silenceStart = null;
 let isSpeaking = false;
-const SILENCE_THRESHOLD = 1000; // 1 saniye sessizlikte durdur
-const VOLUME_THRESHOLD = 0.02;  // Ses seviyesi eşiği
 
-// WAV Header (DÜZELTİLDİ: sampleRate parametrik yapıldı)
+// --- AYARLARI GEVŞETTİK ---
+const SILENCE_THRESHOLD = 2500; // 1sn -> 2.5sn (Düşünme payı verdik)
+const VOLUME_THRESHOLD = 0.015; // Hassasiyeti biraz artırdık (Daha fısıltıyı da duysun)
+const MIN_RECORD_DURATION = 1500; // 1.5 saniyeden kısa sesleri çöp say (Halüsinasyonu önler)
+let recordingStartTime = 0;
+// ---------------------------
+
 function createWavHeader(dataLength, sampleRate) {
     const buffer = new ArrayBuffer(44);
     const view = new DataView(buffer);
-    // RIFF chunk descriptor
-    view.setUint32(0, 0x52494646, false); // 'RIFF'
+    view.setUint32(0, 0x52494646, false); 
     view.setUint32(4, 36 + dataLength, true); 
-    view.setUint32(8, 0x57415645, false); // 'WAVE'
-    // fmt sub-chunk
-    view.setUint32(12, 0x666d7420, false); // 'fmt '
-    view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
-    view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
-    view.setUint16(22, 1, true); // NumChannels (1 for Mono)
-    view.setUint32(24, sampleRate, true); // SampleRate (Örn: 48000 veya 44100)
-    view.setUint32(28, sampleRate * 2, true); // ByteRate (SampleRate * NumChannels * BitsPerSample/8)
-    view.setUint16(32, 2, true); // BlockAlign (NumChannels * BitsPerSample/8)
-    view.setUint16(34, 16, true); // BitsPerSample (16 bits)
-    // data sub-chunk
-    view.setUint32(36, 0x64617461, false); // 'data'
+    view.setUint32(8, 0x57415645, false); 
+    view.setUint32(12, 0x666d7420, false); 
+    view.setUint32(16, 16, true); 
+    view.setUint16(20, 1, true); 
+    view.setUint16(22, 1, true); 
+    view.setUint32(24, sampleRate, true); 
+    view.setUint32(28, sampleRate * 2, true); 
+    view.setUint16(32, 2, true); 
+    view.setUint16(34, 16, true); 
+    view.setUint32(36, 0x64617461, false); 
     view.setUint32(40, dataLength, true);
     return buffer;
 }
@@ -49,8 +50,6 @@ function floatTo16BitPCM(input) {
 
 async function startRecording() {
     try {
-        // DÜZELTME: sampleRate: 16000 zorlaması kaldırıldı.
-        // Tarayıcının/Donanımın doğal hızı neyse o kullanılacak (44.1k veya 48k).
         if (!audioContext) {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
@@ -68,12 +67,14 @@ async function startRecording() {
         processor = audioContext.createScriptProcessor(4096, 1, 1);
         let recordedChunks = [];
 
+        recordingStartTime = Date.now(); // Kayıt başlangıcını not et
+
         processor.onaudioprocess = (e) => {
             if (!isRecording) return;
             
             const inputData = e.inputBuffer.getChannelData(0);
             
-            // --- VAD LOGIC (Hands-Free) ---
+            // --- IMPROVED VAD LOGIC ---
             if (isHandsFree) {
                 let sum = 0;
                 for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
@@ -89,7 +90,7 @@ async function startRecording() {
                 } else if (isSpeaking) {
                     if (!silenceStart) silenceStart = Date.now();
                     else if (Date.now() - silenceStart > SILENCE_THRESHOLD) {
-                        console.log("🤫 Silence detected. Auto-submitting...");
+                        console.log("🤫 Silence detected (Threshold reached). Processing...");
                         stopRecording();
                         return;
                     }
@@ -120,16 +121,29 @@ async function startRecording() {
 
 async function stopRecording() {
     if (!isRecording) return;
+    
+    // Çok kısa kayıt kontrolü
+    const duration = Date.now() - recordingStartTime;
+    if (isHandsFree && duration < MIN_RECORD_DURATION) {
+        console.warn(`⚠️ Recording too short (${duration}ms). Discarding to prevent hallucination.`);
+        // Kaydı çöpe at ama döngüyü kırma
+        cleanupResources();
+        updateUI(false);
+        stopTimer();
+        // Hemen yeniden dinlemeye başla
+        setTimeout(startRecording, 200);
+        return;
+    }
+
     isRecording = false;
     updateUI(false);
     stopTimer();
     $('visualizer').parentElement.classList.remove('listening');
 
-    if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
-    if (processor) { processor.disconnect(); processor = null; }
+    cleanupResources(); // AudioNode bağlantılarını kes
 
     const chunks = window.localStream.recordedChunks;
-    if (chunks.length === 0) return;
+    if (!chunks || chunks.length === 0) return;
 
     const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
     const result = new Int16Array(totalLength);
@@ -139,18 +153,24 @@ async function stopRecording() {
         offset += chunk.length;
     }
 
-    // DÜZELTME: Header oluşturulurken AudioContext'in gerçek sampleRate'i gönderiliyor.
-    // Backend bu değeri okuyup ona göre resampling yapacak.
     const header = createWavHeader(result.length * 2, audioContext.sampleRate);
     const wavBlob = new Blob([header, result], { type: 'audio/wav' });
     
     console.log(`📤 Uploading audio: ${result.length} samples @ ${audioContext.sampleRate}Hz`);
+    
+    // Upload asenkron devam ederken biz arayüzü hazırlayalım
     await uploadAudio(wavBlob);
 
     if (isHandsFree) {
         console.log("🔄 Hands-Free loop: Restarting listener...");
         setTimeout(startRecording, 500);
     }
+}
+
+function cleanupResources() {
+    if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+    if (processor) { processor.disconnect(); processor = null; }
+    // AudioContext'i kapatmıyoruz, sürekli lazım.
 }
 
 async function uploadAudio(blob) {
@@ -172,10 +192,19 @@ async function uploadAudio(blob) {
         
         if(res.ok) {
             const currentText = $('output').innerText;
-            if (currentText.includes("Ready to process") || currentText.includes("Processing")) {
-                $('output').innerText = `[${new Date().toLocaleTimeString()}] ${data.text}\n`;
-            } else {
-                 $('output').innerText = `[${new Date().toLocaleTimeString()}] ${data.text}\n` + $('output').innerText;
+            const newText = data.text.trim();
+            
+            // Boş veya anlamsız çıktıları filtrele
+            if(newText.length > 0) {
+                const timestamp = new Date().toLocaleTimeString();
+                const entry = `[${timestamp}] ${newText}\n`;
+                
+                if (currentText.includes("Ready to process")) {
+                    $('output').innerText = entry;
+                } else {
+                    // Yeni metni üste ekle
+                    $('output').innerText = entry + $('output').innerText;
+                }
             }
             
             $('jsonOutput').innerText = JSON.stringify(data, null, 2);
@@ -184,10 +213,6 @@ async function uploadAudio(blob) {
                 $('metaDuration').innerText = data.duration.toFixed(2) + "s";
                 $('metaProcess').innerText = data.meta.processing_time.toFixed(3) + "s";
                 $('metaSpeed').innerText = "⚡ " + data.meta.rtf.toFixed(1) + "x";
-            } else {
-                $('metaDuration').innerText = data.duration ? data.duration.toFixed(2) + "s" : "--";
-                $('metaProcess').innerText = "--";
-                $('metaSpeed').innerText = "--";
             }
         } else {
             console.error(data.error);
@@ -225,8 +250,10 @@ function stopTimer() {
 }
 
 function setLoading(loading) {
-    if(loading) {
-        $('output').innerHTML = '<div class="placeholder"><i class="fas fa-circle-notch fa-spin"></i> Processing...</div>';
+    // Loading animasyonunu sadece metin alanı boşsa veya Hands-Free kapalıysa göster
+    // Hands-Free modunda sürekli "Processing..." yazısı titremesin
+    if(loading && !isHandsFree) {
+        // $('output').innerHTML = ... (Opsiyonel: Bunu sildim, akışı bozmuyor)
     }
 }
 

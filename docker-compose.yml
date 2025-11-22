@@ -34,7 +34,7 @@ services:
       
       # --- Model Yönetimi ---
       - STT_WHISPER_SERVICE_MODEL_DIR=/models
-      - STT_WHISPER_SERVICE_MODEL_FILENAME=ggml-medium.bin
+      - STT_WHISPER_SERVICE_MODEL_FILENAME=ggml-base.bin
       # İsteğe bağlı: Custom model URL'i
       # - STT_WHISPER_SERVICE_MODEL_URL=https://huggingface.co/.../ggml-model.bin
       
