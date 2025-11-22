@@ -21,6 +21,7 @@ service SttWhisperService {
 **WhisperTranscribeRequest**
 *   `bytes audio_data`: Ham ses verisi (WAV headerlı veya headersız PCM).
 *   `string language`: (Opsiyonel) "tr", "en" vb.
+    *   ℹ️ **Not:** Eğer bu alan dolu gönderilirse, sunucudaki `STT_WHISPER_SERVICE_LANGUAGE` ayarını **geçersiz kılar (override)** ve bu dili kullanır.
 
 **WhisperTranscribeResponse**
 *   `string transcription`: Üretilen metin.
@@ -47,6 +48,7 @@ Ses dosyasını yükleyerek metin çıktısı alır.
       "duration": 2.5
     }
     ```
+*   **Dil Seçimi:** Şu an için REST API her zaman `STT_WHISPER_SERVICE_LANGUAGE` (Env Var) değerini veya Otomatik Algılamayı kullanır.
 
 ### 2.2. Sağlık Kontrolü (`GET /health`)
 Servisin ve modelin durumunu bildirir. Orchestrator (K8s) liveness probe için kullanılır.
@@ -68,6 +70,3 @@ Servisin ve modelin durumunu bildirir. Orchestrator (K8s) liveness probe için k
 
 1.  **Ses Formatı:** Servis dahili olarak **16kHz** örnekleme hızı kullanır. Farklı formatlar (örn: 8kHz) otomatik olarak dönüştürülür (`libsamplerate` ile), ancak en iyi performans için 16kHz WAV önerilir.
 2.  **Concurrency:** `STT_WHISPER_SERVICE_THREADS` ortam değişkeni ile CPU thread kullanımı sınırlanabilir. Varsayılan: 4.
-
-
----

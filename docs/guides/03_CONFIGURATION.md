@@ -20,7 +20,7 @@ Servis, aşağıdaki ortam değişkenleri ile yapılandırılır. `sentiric-conf
 ### Transkripsiyon Ayarları
 | Değişken | Açıklama | Varsayılan |
 |---|---|---|
-| `STT_WHISPER_SERVICE_LANGUAGE` | Hedef dil (`auto`, `tr`, `en`). | `auto` |
+| `STT_WHISPER_SERVICE_LANGUAGE` | **Varsayılan dil.** API isteğinde `language` belirtilmezse bu değer kullanılır. | `auto` |
 | `STT_WHISPER_SERVICE_BEAM_SIZE` | Beam search genişliği. (1 = Greedy). | `5` |
 | `STT_WHISPER_SERVICE_NO_SPEECH_THRESHOLD` | VAD hassasiyeti (0.0 - 1.0). | `0.6` |
 | `STT_WHISPER_SERVICE_LOGPROB_THRESHOLD` | Düşük güvenli tahminleri filtreleme. | `-1.0` |
