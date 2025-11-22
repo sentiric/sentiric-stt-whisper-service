@@ -2,72 +2,60 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sentiric Omni-Studio | AI Terminal</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💠</text></svg>">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentiric STT Studio | Voice Terminal</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎧</text></svg>">
     
-    <!-- Fontlar ve İkonlar -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    
-    <!-- Highlight.js -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    
-    <!-- Markdown Parser -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-theme="dark">
 
 <div class="app-container">
     
     <!-- SOL PANEL: AYARLAR -->
-    <nav class="sidebar" id="settingsPanel">
+    <nav class="sidebar">
         <div class="sidebar-header">
             <div class="brand">
-                <i class="fas fa-cube fa-spin-pulse" style="--fa-animation-duration: 3s;"></i>
-                <span>SENTIRIC</span>
-                <span class="badge">v4.0</span>
+                <i class="fas fa-wave-square"></i>
+                <span>SENTIRIC STT</span>
+                <span class="badge">v2.1</span>
             </div>
         </div>
 
         <div class="sidebar-content">
             <div class="group">
-                <label class="group-label">Sistem Kimliği (System Prompt)</label>
-                <textarea id="systemPrompt" rows="5" placeholder="AI'nın kişiliğini tanımlayın..."></textarea>
-            </div>
-
-            <div class="group">
-                <label class="group-label">Model Parametreleri</label>
-                
-                <div class="control-row">
-                    <span>Sıcaklık (Temp)</span>
-                    <span id="valTemp">0.8</span>
-                </div>
-                <input type="range" id="rngTemp" min="0" max="1.5" step="0.1" value="0.8">
-
-                <div class="control-row">
-                    <span>Maks. Token</span>
-                    <span id="valTokens">2048</span>
-                </div>
-                <input type="range" id="rngTokens" min="128" max="8192" step="128" value="2048">
-            </div>
-
-            <div class="group">
-                <label class="group-label">Ses & Dil</label>
-                <div class="toggle-row">
-                    <span>TTS (Sesli Okuma)</span>
-                    <label class="switch">
-                        <input type="checkbox" id="chkTTS">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-                <select id="selLang" class="select-box">
-                    <option value="tr-TR">🇹🇷 Türkçe</option>
-                    <option value="en-US">🇺🇸 English</option>
+                <label class="group-label">Hedef Dil</label>
+                <select id="langSelect" class="select-box">
+                    <option value="auto">✨ Otomatik Algıla</option>
+                    <option value="tr">🇹🇷 Türkçe</option>
+                    <option value="en">🇺🇸 English</option>
+                    <option value="de">🇩🇪 Deutsch</option>
                 </select>
+            </div>
+
+            <div class="group">
+                <label class="group-label">VAD Hassasiyeti (Sessizlik)</label>
+                <div class="control-row">
+                    <span>Eşik Değeri</span>
+                    <span id="vadVal">0.02</span>
+                </div>
+                <input type="range" id="vadRange" min="0.001" max="0.1" step="0.001" value="0.02">
+                
+                <!-- Canlı VAD Metre -->
+                <div class="vad-meter-container">
+                    <div class="vad-bar" id="vadLevel"></div>
+                    <div class="vad-threshold" id="vadThresholdLine"></div>
+                </div>
+                <div class="status-text" id="vadStatus">Sessiz</div>
+            </div>
+
+            <div class="group">
+                <label class="group-label">Görünüm</label>
+                <button class="theme-btn" onclick="ui.toggleTheme()">
+                    <i class="fas fa-sun"></i> / <i class="fas fa-moon"></i> Tema Değiştir
+                </button>
             </div>
         </div>
 
@@ -79,112 +67,87 @@
         </div>
     </nav>
 
-    <!-- ORTA PANEL: CHAT & VISUALIZER -->
+    <!-- ORTA PANEL: TRANSCRIPT AKIŞI -->
     <main class="stage">
-        <!-- Header -->
         <header class="stage-header">
-            <button class="icon-btn" onclick="app.ui.toggleSidebar('settingsPanel')">
-                <i class="fas fa-bars"></i>
-            </button>
-            
-            <div class="model-display">
-                <span class="model-name">LLAMA SERVICE</span>
+            <div class="model-info">
+                <span class="model-name">WHISPER ENGINE</span>
                 <span class="model-meta" id="modelMeta">--</span>
             </div>
-
-            <button class="icon-btn" onclick="app.ui.toggleSidebar('ragPanel')">
-                <i class="fas fa-database"></i>
-            </button>
+            
+            <div class="actions">
+                <button class="icon-btn" onclick="ui.clearChat()" title="Temizle"><i class="fas fa-trash-alt"></i></button>
+            </div>
         </header>
 
-        <!-- Chat Alanı -->
-        <div id="chatHistory" class="chat-history">
+        <!-- Konuşma Balonları Alanı -->
+        <div id="transcriptHistory" class="transcript-history">
             <div class="empty-state">
-                <div class="empty-logo">💠</div>
-                <h1>Sentiric Engine</h1>
-                <p>Yüksek performanslı yerel yapay zeka motoru.</p>
+                <div class="empty-logo">🎙️</div>
+                <h1>Ses Analiz Terminali</h1>
+                <p>Mikrofonu açın veya bir ses dosyası yükleyin.</p>
             </div>
         </div>
 
-        <!-- Alt Kontrol Alanı (Dock) -->
+        <!-- Alt Kontrol Dock -->
         <div class="control-dock">
-            
-            <!-- Canlı Bilgi Çubuğu -->
-            <div class="telemetry-bar">
-                <div class="stat-item"><i class="fas fa-bolt"></i> <span id="statTPS">--</span> t/s</div>
-                <div class="stat-item"><i class="fas fa-clock"></i> <span id="statLatency">--</span> ms</div>
-                <div id="recordingIndicator" class="rec-indicator hidden">
-                    <div class="rec-dot"></div> DİNLİYOR...
-                </div>
-            </div>
+            <!-- Audio Visualizer -->
+            <canvas id="waveCanvas" width="600" height="60" class="wave-canvas"></canvas>
 
-            <!-- Input Kapsülü -->
             <div class="input-capsule">
-                <!-- Ses Dalgası Canvas -->
-                <canvas id="waveCanvas" width="120" height="40" class="wave-canvas hidden"></canvas>
-
-                <!-- Dosya Yükleme -->
-                <input type="file" id="fileInput" hidden>
-                <button class="dock-btn" onclick="document.getElementById('fileInput').click()">
-                    <i class="fas fa-paperclip"></i>
+                <input type="file" id="fileInput" hidden accept="audio/*">
+                <button class="dock-btn" onclick="$('fileInput').click()" title="Dosya Yükle">
+                    <i class="fas fa-upload"></i>
                 </button>
 
-                <!-- Text Input -->
-                <div class="text-area-wrapper">
-                    <textarea id="userInput" rows="1" placeholder="Bir şeyler yazın..."></textarea>
-                    <!-- Ghost Text (Ses tanıma önizlemesi için) -->
-                    <div id="ghostText" class="ghost-text"></div>
+                <div class="status-display" id="mainStatus">Hazır</div>
+
+                <!-- Hands-Free Toggle -->
+                <div class="toggle-wrapper">
+                    <span>Hands-Free</span>
+                    <label class="switch">
+                        <input type="checkbox" id="handsFreeToggle">
+                        <span class="slider"></span>
+                    </label>
                 </div>
 
-                <!-- Mikrofon / Hands-Free -->
-                <button class="dock-btn" id="btnMic">
+                <button class="record-btn" id="recordBtn">
                     <i class="fas fa-microphone"></i>
-                </button>
-                
-                <button class="dock-btn" id="btnLive">
-                    <i class="fas fa-headset"></i>
-                </button>
-
-                <!-- Gönder -->
-                <button class="send-btn" id="btnSend">
-                    <i class="fas fa-paper-plane"></i>
-                </button>
-                
-                <button class="stop-btn hidden" id="btnStop">
-                    <i class="fas fa-stop"></i>
                 </button>
             </div>
         </div>
     </main>
 
-    <!-- SAĞ PANEL: RAG & LOGS -->
-    <nav class="sidebar right" id="ragPanel">
+    <!-- SAĞ PANEL: VERİ & METRİKLER -->
+    <nav class="sidebar right">
         <div class="sidebar-header">
-            <span class="sidebar-title">BAĞLAM & VERİ</span>
+            <span class="sidebar-title">ANALİZ VERİLERİ</span>
         </div>
         <div class="sidebar-content">
-            <div class="group">
-                <label class="group-label">RAG Context (Bilgi Bankası)</label>
-                <textarea id="ragContext" class="code-area" rows="15" placeholder="AI'nın kullanmasını istediğiniz doküman içeriği..."></textarea>
-                <div class="char-count">Karakter: <span id="ragCount">0</span></div>
-            </div>
             
+            <div class="dashboard-grid">
+                <div class="dash-card">
+                    <label>Süre</label>
+                    <div class="value" id="metaDuration">--</div>
+                </div>
+                <div class="dash-card">
+                    <label>İşlem</label>
+                    <div class="value" id="metaProcess">--</div>
+                </div>
+                <div class="dash-card full">
+                    <label>Hız (RTF)</label>
+                    <div class="value highlight" id="metaSpeed">--</div>
+                </div>
+            </div>
+
             <div class="group">
-                <label class="group-label">Son Yanıt JSON</label>
+                <label class="group-label">Son Segment JSON</label>
                 <pre id="jsonLog" class="json-log">{}</pre>
             </div>
-        </div>
-        <div class="sidebar-footer">
-            <button class="outline-btn" onclick="app.chat.clearHistory()">
-                <i class="fas fa-trash"></i> Sohbeti Temizle
-            </button>
         </div>
     </nav>
 
 </div>
-
-<!-- Glass Overlay (Mobile) -->
-<div class="overlay" id="uiOverlay" onclick="app.ui.closeAll()"></div>
 
 <script src="app.js"></script>
 </body>
