@@ -2,6 +2,7 @@ services:
   stt-whisper-service:
     image: ghcr.io/sentiric/sentiric-stt-whisper-service:latest
     
+    # CPU Build Tanımı
     build:
       context: .
       dockerfile: Dockerfile

@@ -1,9 +1,5 @@
 services:
   stt-whisper-service:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: sentiric/stt-whisper-service:local
-    # --- EKLENDİ: Yerel modelleri içeri aktar ---
+    # SADECE Yerel Geliştirme Ayarları (Build tanımı YOK)
     volumes:
       - ./models:/models

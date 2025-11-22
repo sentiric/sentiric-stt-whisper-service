@@ -1,14 +1,12 @@
 services:
   stt-whisper-service:
-    # Production İmajı
     image: ghcr.io/sentiric/sentiric-stt-whisper-service:latest-gpu
     
-    # Local Build (İmaj yoksa veya dev modunda buradan derler)
+    # GPU Build Tanımı
     build:
       context: .
       dockerfile: Dockerfile.gpu
     
-    # GPU Kaynakları
     deploy:
       resources:
         reservations:
@@ -17,7 +15,6 @@ services:
               count: 1
               capabilities: [gpu]
     
-    # GPU Ortam Değişkenleri (Override)
     environment:
       - STT_WHISPER_SERVICE_DEVICE=cuda
       - STT_WHISPER_SERVICE_COMPUTE_TYPE=float16
