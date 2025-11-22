@@ -18,10 +18,12 @@ struct Settings {
     std::string model_url_template = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin";
     int model_load_timeout = 600;
 
-    // --- VAD Settings (GÜNCELLENDİ: URL Eklendi) ---
+    // --- VAD Settings (NİHAİ DÜZELTME) ---
+    // Yerelde kullanılacak dosya adı (Kod bu ismi arar)
     std::string vad_model_filename = "ggml-silero-vad.bin"; 
-    // Resmi Whisper.cpp VAD Model URL'i (HuggingFace)
-    std::string vad_model_url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-silero-vad.bin";
+    
+    // İndirilecek Kaynak URL (ggml-org/whisper-vad reposu - v6.2.0)
+    std::string vad_model_url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin";
     
     bool enable_vad = true;
     float vad_threshold = 0.5f;        
