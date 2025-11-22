@@ -3,6 +3,7 @@
 #include "stt_engine.h"
 #include <memory>
 #include <string>
+#include <vector>
 #include "httplib.h"
 #include <prometheus/registry.h>
 #include <prometheus/counter.h>
@@ -14,6 +15,13 @@ struct AppMetrics {
     prometheus::Counter& requests_total;
     prometheus::Histogram& request_latency;
     prometheus::Counter& audio_seconds_processed_total;
+};
+
+// İşlenmiş ses verisi yapısı
+struct DecodedAudio {
+    std::vector<int16_t> pcm_data;
+    int sample_rate = 16000;
+    int channels = 1;
 };
 
 class MetricsServer {
@@ -38,8 +46,9 @@ public:
 
 private:
     void setup_routes();
-    // WAV header'ını ayrıştırıp raw PCM verisini döndürür
-    std::vector<int16_t> parse_wav(const std::string& bytes);
+    
+    // Güvenli WAV parser ve Mono Converter
+    DecodedAudio parse_wav_robust(const std::string& bytes);
 
     httplib::Server svr_;
     std::shared_ptr<SttEngine> engine_;
