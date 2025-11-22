@@ -7,14 +7,14 @@
 #include <numeric>
 
 SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
-    // 1. Ana Model Yükleme
+    // 1. Ana Model Yükleme (GPU Destekli)
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
     spdlog::info("Loading Whisper model from: {}", model_path);
 
     struct whisper_context_params cparams = whisper_context_default_params();
     
     #ifdef GGML_USE_CUDA
-    spdlog::info("CUDA detected. Enabling GPU offloading.");
+    spdlog::info("CUDA detected. Enabling GPU offloading for Main Engine.");
     cparams.use_gpu = true;
     if (settings_.flash_attn) {
         spdlog::info("⚡ Flash Attention enabled.");
@@ -28,23 +28,25 @@ SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
         throw std::runtime_error("Whisper model initialization failed");
     }
 
-    // 2. VAD Modeli Yükleme
+    // 2. VAD Modeli Yükleme (CPU ZORUNLU)
+    // NOT: Whisper.cpp v1.8.2 sürümünde VAD'ı GPU'da başlatmak bellek hatasına (Segfault 139)
+    // neden olmaktadır. VAD çok hafif olduğu için CPU'da çalıştırmak performans kaybı yaratmaz
+    // ve stabiliteyi %100 sağlar.
     if (settings_.enable_vad) {
         std::string vad_path = settings_.model_dir + "/" + settings_.vad_model_filename;
         spdlog::info("Loading VAD model from: {}", vad_path);
         
-        // v1.8.2 VAD Params
         struct whisper_vad_context_params vparams = whisper_vad_default_context_params();
-        #ifdef GGML_USE_CUDA
-        vparams.use_gpu = true;
-        #endif
+        
+        // KRİTİK DÜZELTME: VAD için GPU'yu devre dışı bırak.
+        vparams.use_gpu = false; 
         
         vad_ctx_ = whisper_vad_init_from_file_with_params(vad_path.c_str(), vparams);
         
         if (!vad_ctx_) {
             spdlog::warn("⚠️ VAD model could not be loaded from '{}'. Continuing without VAD.", vad_path);
         } else {
-            spdlog::info("✅ Native Silero VAD loaded successfully.");
+            spdlog::info("✅ Native Silero VAD loaded successfully (CPU Mode).");
         }
     }
     
@@ -87,14 +89,10 @@ std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, in
     return output;
 }
 
-// DÜZELTİLDİ: VAD Kontrol Fonksiyonu (whisper.cpp v1.8.2 API Uyumlu)
 bool SttEngine::is_speech_detected(const std::vector<float>& pcmf32) {
-    if (!vad_ctx_) return true; // VAD yoksa her şeyi işle
+    if (!vad_ctx_) return true; 
 
-    // v1.8.2 API değişikliği: whisper_vad_detect_speech sadece 3 argüman alıyor.
-    // Threshold ve diğer parametreler şu an API üzerinden dinamik verilemiyor.
-    // Varsayılan değerler kullanılıyor.
-    
+    // API: (ctx, samples, n_samples)
     bool is_speech = whisper_vad_detect_speech(
         vad_ctx_, 
         pcmf32.data(), 
@@ -116,7 +114,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
     for (size_t i = 0; i < pcm16.size(); ++i) {
         pcmf32[i] = static_cast<float>(pcm16[i]) / 32768.0f;
     }
-    // Resampling transcribe içinde yapılıyor
     return transcribe(pcmf32, input_sample_rate, language);
 }
 
@@ -129,7 +126,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
 
     if (!ctx_) return {};
 
-    // 1. Resampling (Eğer gerekliyse)
     std::vector<float> processed_audio;
     if (input_sample_rate != 16000) {
         processed_audio = resample_audio(pcmf32, input_sample_rate, 16000);
@@ -137,22 +133,19 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         processed_audio = pcmf32;
     }
 
-    // 2. PRE-CHECK: VAD (Native Silero)
-    // Eğer ses çok kısaysa VAD'ı atla, direkt işle (Örn: Komutlar)
+    // VAD Check
     if (settings_.enable_vad && processed_audio.size() > (16000 * 0.2)) { 
         if (!is_speech_detected(processed_audio)) {
-            // Konuşma yoksa boş ama geçerli bir sonuç dön
             TranscriptionResult empty_res;
             empty_res.text = "";
             empty_res.language = "unknown";
             empty_res.prob = 0.0f;
             empty_res.t0 = 0;
-            empty_res.t1 = (int64_t)((double)processed_audio.size() / 16.0); // ms cinsinden
+            empty_res.t1 = (int64_t)((double)processed_audio.size() / 16.0); 
             return {empty_res}; 
         }
     }
 
-    // 3. Inference (Whisper Full)
     whisper_sampling_strategy strategy = (settings_.beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
     whisper_full_params wparams = whisper_full_default_params(strategy);
     

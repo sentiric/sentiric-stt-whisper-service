@@ -1,5 +1,3 @@
 services:
   stt-whisper-service:
     # SADECE Yerel Geliştirme Ayarları (Build tanımı YOK)
-    volumes:
-      - ./models:/models
