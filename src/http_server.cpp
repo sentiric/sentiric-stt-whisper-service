@@ -36,7 +36,6 @@ HttpServer::HttpServer(std::shared_ptr<SttEngine> engine, AppMetrics& metrics, c
 
 void HttpServer::setup_routes() {
     // 1. Statik Dosyalar (Omni-Studio)
-    // Docker içinde /app/studio klasörünü kök (/) olarak sun
     auto ret = svr_.set_mount_point("/", "./studio");
     if (!ret) {
         spdlog::warn("⚠️ Could not mount ./studio directory. UI might not work.");
@@ -49,16 +48,16 @@ void HttpServer::setup_routes() {
             {"status", ready ? "healthy" : "unhealthy"},
             {"model_ready", ready},
             {"service", "sentiric-stt-whisper-service"},
-            {"version", "2.0.0"}
+            {"version", "2.0.0"},
+            {"api_compatibility", "openai-whisper"}
         };
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(response.dump(), "application/json");
         res.status = ready ? 200 : 503;
     });
 
-    // 3. Transcribe Endpoint (REST API)
-    // Omni-Studio ve basit entegrasyonlar için
-    svr_.Post("/v1/transcribe", [this](const httplib::Request &req, httplib::Response &res) {
+    // 3. Transcribe Handler (Ortak Mantık)
+    auto transcribe_handler = [this](const httplib::Request &req, httplib::Response &res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         metrics_.requests_total.Increment();
         
@@ -70,35 +69,67 @@ void HttpServer::setup_routes() {
 
         if (!req.has_file("file")) {
             res.status = 400;
-            res.set_content(json{{"error", "No file uploaded"}}.dump(), "application/json");
+            res.set_content(json{{"error", "No file uploaded. Field 'file' is required."}}.dump(), "application/json");
             return;
         }
 
         const auto& file = req.get_file_value("file");
-        spdlog::info("Received file upload: {} ({} bytes)", file.filename, file.content.size());
+        
+        // Dil parametresini kontrol et (form data veya query param)
+        std::string lang = "";
+        if (req.has_file("language")) {
+            lang = req.get_file_value("language").content;
+        }
+
+        spdlog::info("🎤 Processing Audio: {} ({} bytes) | Lang Request: {}", file.filename, file.content.size(), lang);
 
         try {
-            // WAV parse et ve işle
+            auto start_time = std::chrono::steady_clock::now();
+            
             auto pcm16 = parse_wav(file.content);
-            auto results = engine_->transcribe_pcm16(pcm16);
+            
+            // Dil parametresini engine'e ilet
+            auto results = engine_->transcribe_pcm16(pcm16, 16000, lang);
+
+            auto end_time = std::chrono::steady_clock::now();
+            std::chrono::duration<double> processing_time = end_time - start_time;
 
             // Sonucu birleştir
             std::string full_text;
-            std::string lang = "unknown";
+            std::string detected_lang = "unknown";
+            json segments = json::array();
             
             for (const auto& r : results) {
                 full_text += r.text;
-                lang = r.language;
+                detected_lang = r.language;
+                segments.push_back({
+                    {"text", r.text},
+                    {"start", (double)r.t0 / 1000.0},
+                    {"end", (double)r.t1 / 1000.0},
+                    {"probability", r.prob}
+                });
             }
 
             double duration = (double)pcm16.size() / 16000.0;
             metrics_.audio_seconds_processed_total.Increment(duration);
+            metrics_.request_latency.Observe(processing_time.count());
 
+            // OpenAI Uyumlu Yanıt Formatı + Extra Metadata
             json response = {
                 {"text", full_text},
-                {"language", lang},
-                {"duration", duration}
+                {"language", detected_lang},
+                {"duration", duration},
+                {"segments", segments}, // Detaylı segmentler
+                // Sentiric Özel Metadata
+                {"meta", {
+                    {"processing_time", processing_time.count()},
+                    {"rtf", processing_time.count() / (duration > 0 ? duration : 1.0)}, // Real Time Factor
+                    {"device", "native-cpp"}
+                }}
             };
+
+            spdlog::info("✅ Transcription Done. Audio: {:.2f}s, Proc: {:.2f}s, RTF: {:.2f}x", 
+                         duration, processing_time.count(), duration / processing_time.count());
 
             res.set_content(response.dump(), "application/json");
 
@@ -107,24 +138,22 @@ void HttpServer::setup_routes() {
             res.status = 500;
             res.set_content(json{{"error", e.what()}}.dump(), "application/json");
         }
-    });
+    };
+
+    // 4. Endpointler
+    // Kendi standardımız
+    svr_.Post("/v1/transcribe", transcribe_handler);
+    
+    // OpenAI Standardı (Open WebUI uyumluluğu için)
+    svr_.Post("/v1/audio/transcriptions", transcribe_handler);
 }
 
 std::vector<int16_t> HttpServer::parse_wav(const std::string& bytes) {
-    // Çok basit WAV header atlayıcı (Robust bir çözüm değil ama MVP için yeterli)
-    // Standart WAV header 44 bytetır.
     if (bytes.size() < 44) return {};
-
-    // Header'ı atla, kalanı kopyala
-    // Not: Gelen verinin 16-bit PCM olduğunu varsayıyoruz.
-    // Omni-Studio JS tarafında bunu garanti etmeliyiz.
     size_t data_size = bytes.size() - 44;
-    // Çift sayıya yuvarla (2 byte = 1 sample)
     data_size = data_size - (data_size % 2);
-
     std::vector<int16_t> pcm(data_size / 2);
     std::memcpy(pcm.data(), bytes.data() + 44, data_size);
-    
     return pcm;
 }
 
