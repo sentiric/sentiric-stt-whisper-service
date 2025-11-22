@@ -11,6 +11,10 @@
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
 
+// --- DÜZELTME 1: spdlog sink header'ı eklendi ---
+#include "spdlog/sinks/stdout_color_sinks.h" 
+// -----------------------------------------------
+
 namespace {
     std::promise<void> shutdown_promise;
 }
@@ -20,7 +24,6 @@ void signal_handler(int signal) {
     try { shutdown_promise.set_value(); } catch (...) {}
 }
 
-// Log callback for whisper.cpp
 void whisper_log_cb(ggml_log_level level, const char * text, void * user_data) {
     (void)user_data;
     std::string msg(text);
@@ -48,7 +51,6 @@ int main() {
     spdlog::set_default_logger(console);
     spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v");
     
-    // Whisper Loglarını Bağla
     whisper_log_set(whisper_log_cb, nullptr);
 
     signal(SIGINT, signal_handler);
@@ -66,19 +68,24 @@ int main() {
         #endif
     );
 
-    // Prometheus Metrikleri
     auto registry = std::make_shared<prometheus::Registry>();
     auto& req_total = prometheus::BuildCounter().Name("stt_requests_total").Register(*registry).Add({});
-    auto& req_latency = prometheus::BuildHistogram().Name("stt_request_latency_seconds").Register(*registry).Add({}, {0.1, 0.5, 1.0, 5.0, 10.0});
+    
+    // --- DÜZELTME 2: Histogram bucket tanımlaması ---
+    prometheus::Histogram::BucketBoundaries buckets{0.1, 0.5, 1.0, 5.0, 10.0};
+    auto& req_latency = prometheus::BuildHistogram()
+                            .Name("stt_request_latency_seconds")
+                            .Register(*registry)
+                            .Add({}, buckets); // Açıkça bucket boundaries nesnesini geçiriyoruz
+    // -----------------------------------------------
+
     auto& audio_sec = prometheus::BuildCounter().Name("stt_audio_seconds_processed_total").Register(*registry).Add({});
     
     AppMetrics metrics = {req_total, req_latency, audio_sec};
 
     try {
-        // Motoru Başlat
         auto engine = std::make_shared<SttEngine>(settings);
 
-        // Sunucuları Başlat
         grpc::EnableDefaultHealthCheckService(true);
         
         GrpcServer grpc_service(engine, metrics);
@@ -90,7 +97,6 @@ int main() {
             builder.AddListeningPort(grpc_addr, grpc::InsecureServerCredentials());
             spdlog::warn("gRPC listening on {} (INSECURE)", grpc_addr);
         } else {
-            // mTLS Konfigürasyonu (llm-service ile aynı)
             std::string root = read_file(settings.grpc_ca_path);
             std::string cert = read_file(settings.grpc_cert_path);
             std::string key = read_file(settings.grpc_key_path);
@@ -108,15 +114,13 @@ int main() {
         std::unique_ptr<grpc::Server> grpc_server = builder.BuildAndStart();
 
         HttpServer http_server(engine, settings.host, settings.http_port);
-        MetricsServer metrics_server(settings.host, settings.http_port + 100, *registry); // Metrics portu ayrı olabilir veya aynı portta farklı path
+        MetricsServer metrics_server(settings.host, settings.http_port + 100, *registry);
 
-        // Threadler
         std::thread http_thread([&](){ http_server.run(); });
         std::thread metrics_thread([&](){ metrics_server.run(); });
         
         spdlog::info("✅ Service Ready!");
 
-        // Shutdown Bekle
         shutdown_promise.get_future().wait();
         
         spdlog::info("Stopping servers...");
