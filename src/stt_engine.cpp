@@ -1,7 +1,9 @@
 #include "stt_engine.h"
 #include "spdlog/spdlog.h"
+#include <samplerate.h> // Libsamplerate
 #include <stdexcept>
 #include <cmath>
+#include <algorithm>
 
 SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
@@ -37,20 +39,66 @@ bool SttEngine::is_ready() const {
     return ctx_ != nullptr;
 }
 
-std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(const std::vector<int16_t>& pcm16) {
-    // 16-bit INT -> 32-bit FLOAT dönüşümü (normalize)
+std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, int src_rate, int target_rate) {
+    if (src_rate == target_rate || input.empty()) {
+        return input;
+    }
+
+    double ratio = (double)target_rate / (double)src_rate;
+    long output_frames = (long)(input.size() * ratio) + 100; // Biraz buffer ekle
+    std::vector<float> output(output_frames);
+
+    SRC_DATA src_data;
+    src_data.data_in = input.data();
+    src_data.input_frames = (long)input.size();
+    src_data.data_out = output.data();
+    src_data.output_frames = output_frames;
+    src_data.src_ratio = ratio;
+    src_data.end_of_input = 0; // Batch mode için basit ayar, streaming için state gerekir
+
+    // SRC_SINC_FASTEST: Hızlı ve yeterince kaliteli
+    int error = src_simple(&src_data, SRC_SINC_FASTEST, 1); // 1 channel (mono)
+
+    if (error) {
+        spdlog::error("Libsamplerate error: {}", src_strerror(error));
+        return input; // Hata durumunda orijinali döndür (veya boş)
+    }
+
+    output.resize(src_data.output_frames_gen);
+    spdlog::debug("Resampled audio from {}Hz to {}Hz ({} -> {} frames)", src_rate, target_rate, input.size(), output.size());
+    return output;
+}
+
+std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(const std::vector<int16_t>& pcm16, int input_sample_rate) {
+    // 1. Adım: 16-bit INT -> 32-bit FLOAT dönüşümü (normalize)
     // Whisper 32-bit float ve -1.0 ile 1.0 arasında değer bekler.
     std::vector<float> pcmf32(pcm16.size());
     for (size_t i = 0; i < pcm16.size(); ++i) {
         pcmf32[i] = static_cast<float>(pcm16[i]) / 32768.0f;
     }
+
+    // 2. Adım: Resampling (Eğer gerekliyse)
+    // Whisper genellikle 16000 Hz bekler.
+    if (input_sample_rate != 16000) {
+        pcmf32 = resample_audio(pcmf32, input_sample_rate, 16000);
+    }
+
     return transcribe(pcmf32);
 }
 
-std::vector<TranscriptionResult> SttEngine::transcribe(const std::vector<float>& pcmf32) {
+std::vector<TranscriptionResult> SttEngine::transcribe(const std::vector<float>& pcmf32, int input_sample_rate) {
     std::lock_guard<std::mutex> lock(mutex_); // Context'i kilitle
 
     if (!ctx_) return {};
+
+    // Eğer transcribe metoduna doğrudan float vektör geldiyse ve sample rate farklıysa burada da resample yapmalıyız.
+    // Ancak const referans olduğu için kopyalamamız gerekir.
+    std::vector<float> processed_audio;
+    if (input_sample_rate != 16000) {
+        processed_audio = resample_audio(pcmf32, input_sample_rate, 16000);
+    } else {
+        processed_audio = pcmf32; // Copy (Maliyetli olabilir ama güvenli)
+    }
 
     // Whisper parametrelerini ayarla
     whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
@@ -68,7 +116,7 @@ std::vector<TranscriptionResult> SttEngine::transcribe(const std::vector<float>&
     wparams.no_speech_thold = 0.6f; 
 
     // Transkripsiyonu çalıştır
-    if (whisper_full(ctx_, wparams, pcmf32.data(), pcmf32.size()) != 0) {
+    if (whisper_full(ctx_, wparams, processed_audio.data(), processed_audio.size()) != 0) {
         spdlog::error("Whisper failed to process audio");
         return {};
     }
@@ -82,7 +130,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(const std::vector<float>&
         const int64_t t1 = whisper_full_get_segment_t1(ctx_, i);
         
         // Olasılık (confidence) hesabı
-        // Şimdilik dummy 1.0 veriyoruz, ileride token olasılıkları hesaplanabilir.
         float prob = 1.0f; 
 
         results.push_back({std::string(text), settings_.language, prob, t0, t1});

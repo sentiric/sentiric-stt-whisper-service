@@ -20,7 +20,9 @@ find_package(httplib CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 find_package(prometheus-cpp CONFIG REQUIRED)
-find_package(libsamplerate CONFIG REQUIRED) # Ses dönüşümü için
+
+# DÜZELTME: libsamplerate vcpkg içinde "SampleRate" olarak geçer
+find_package(SampleRate CONFIG REQUIRED) 
 
 if(GGML_CUDA)
     find_package(CUDAToolkit REQUIRED)
@@ -90,8 +92,6 @@ add_executable(stt_service
     src/stt_engine.cpp
     src/grpc_server.cpp
     src/http_server.cpp
-    # src/core/audio_processor.cpp # Henüz yok, sonra eklenecek
-    # src/core/whisper_pool.cpp    # Henüz yok, sonra eklenecek
 )
 add_dependencies(stt_service proto_lib)
 
@@ -99,7 +99,7 @@ target_include_directories(stt_service PRIVATE
     src
     ${WHISPER_INCLUDE_DIR}
     ${WHISPER_COMMON_INCLUDE_DIR}
-    ${WHISPER_EXAMPLES_DIR} # dr_wav.h vb. gerekebilir
+    ${WHISPER_EXAMPLES_DIR}
 )
 
 target_link_libraries(stt_service PRIVATE
@@ -108,7 +108,7 @@ target_link_libraries(stt_service PRIVATE
     spdlog::spdlog nlohmann_json::nlohmann_json
     httplib::httplib c-ares::cares Threads::Threads
     prometheus-cpp::core prometheus-cpp::pull
-    libsamplerate::libsamplerate
+    SampleRate::samplerate # DÜZELTİLDİ
 )
 
 if(GGML_CUDA)

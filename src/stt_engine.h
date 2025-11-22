@@ -24,12 +24,16 @@ public:
     bool is_ready() const;
 
     // PCM verisini (32-bit float) işler ve metin döndürür
-    std::vector<TranscriptionResult> transcribe(const std::vector<float>& pcmf32);
+    // input_sample_rate: Verinin orijinal örnekleme hızı (varsayılan 16000)
+    std::vector<TranscriptionResult> transcribe(const std::vector<float>& pcmf32, int input_sample_rate = 16000);
 
-    // Raw 16-bit PCM verisini işler (dönüştürme yapar)
-    std::vector<TranscriptionResult> transcribe_pcm16(const std::vector<int16_t>& pcm16);
+    // Raw 16-bit PCM verisini işler (dönüştürme ve resampling yapar)
+    std::vector<TranscriptionResult> transcribe_pcm16(const std::vector<int16_t>& pcm16, int input_sample_rate = 16000);
 
 private:
+    // Ses verisini yeniden örnekler (Resampling)
+    std::vector<float> resample_audio(const std::vector<float>& input, int src_rate, int target_rate);
+
     Settings settings_;
     struct whisper_context* ctx_ = nullptr;
     std::mutex mutex_; // Whisper context thread-safe değildir, korumamız lazım
