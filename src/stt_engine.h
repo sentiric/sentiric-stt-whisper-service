@@ -7,12 +7,21 @@
 #include <mutex>
 #include <memory>
 
+// Kelime/Token seviyesinde detay
+struct TokenData {
+    std::string text;
+    float p;       // Olasılık (Probability)
+    int64_t t0;    // Başlangıç (ms)
+    int64_t t1;    // Bitiş (ms)
+};
+
 struct TranscriptionResult {
     std::string text;
     std::string language;
     float prob;
-    int64_t t0; // Başlangıç zamanı (ms)
-    int64_t t1; // Bitiş zamanı (ms)
+    int64_t t0; // Segment Başlangıç (ms)
+    int64_t t1; // Segment Bitiş (ms)
+    std::vector<TokenData> tokens; // YENİ: Kelime bazlı veriler
 };
 
 class SttEngine {
@@ -25,7 +34,6 @@ public:
 
     // PCM verisini (32-bit float) işler ve metin döndürür
     // input_sample_rate: Verinin orijinal örnekleme hızı (varsayılan 16000)
-        // language parametresi eklendi (Varsayılan: config'deki değer)
     std::vector<TranscriptionResult> transcribe(
         const std::vector<float>& pcmf32, 
         int input_sample_rate = 16000,
@@ -33,7 +41,7 @@ public:
     );
 
     // Raw 16-bit PCM verisini işler (dönüştürme ve resampling yapar)
-        std::vector<TranscriptionResult> transcribe_pcm16(
+    std::vector<TranscriptionResult> transcribe_pcm16(
         const std::vector<int16_t>& pcm16, 
         int input_sample_rate = 16000,
         const std::string& language = ""

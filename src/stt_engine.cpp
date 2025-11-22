@@ -54,14 +54,14 @@ std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, in
     src_data.data_out = output.data();
     src_data.output_frames = output_frames;
     src_data.src_ratio = ratio;
-    src_data.end_of_input = 0; // Batch mode için basit ayar, streaming için state gerekir
+    src_data.end_of_input = 0; // Batch mode için basit ayar
 
     // SRC_SINC_FASTEST: Hızlı ve yeterince kaliteli
     int error = src_simple(&src_data, SRC_SINC_FASTEST, 1); // 1 channel (mono)
 
     if (error) {
         spdlog::error("Libsamplerate error: {}", src_strerror(error));
-        return input; // Hata durumunda orijinali döndür (veya boş)
+        return input; // Hata durumunda orijinali döndür
     }
 
     output.resize(src_data.output_frames_gen);
@@ -72,7 +72,7 @@ std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, in
 std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
     const std::vector<int16_t>& pcm16, 
     int input_sample_rate,
-    const std::string& language // Eklendi
+    const std::string& language
 ) {
     // 1. Normalization
     std::vector<float> pcmf32(pcm16.size());
@@ -85,19 +85,19 @@ std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
         pcmf32 = resample_audio(pcmf32, input_sample_rate, 16000);
     }
 
-    return transcribe(pcmf32, 16000, language); // Dili ilet
+    return transcribe(pcmf32, 16000, language);
 }
 
 std::vector<TranscriptionResult> SttEngine::transcribe(
     const std::vector<float>& pcmf32, 
     int input_sample_rate,
-    const std::string& language // Eklendi
+    const std::string& language
 ) {
     std::lock_guard<std::mutex> lock(mutex_); 
 
     if (!ctx_) return {};
 
-    // Resampling Logic (Aynı kalıyor)
+    // Resampling Logic
     std::vector<float> processed_audio;
     if (input_sample_rate != 16000) {
         processed_audio = resample_audio(pcmf32, input_sample_rate, 16000);
@@ -113,56 +113,68 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.print_progress = false;
     wparams.print_timestamps = !settings_.no_timestamps;
     wparams.print_special = false;
+    wparams.token_timestamps = true; // KRİTİK: Token (kelime) bazlı timestamp'i aç
     
     wparams.translate = settings_.translate;
-
     wparams.n_threads = settings_.n_threads;
 
-    // --- DİL SEÇİMİ MANTIĞI (FIX) ---
-    // 1. İstekten gelen dil varsa onu kullan.
-    // 2. Yoksa, ayarlardaki varsayılan dili kullan.
-    // 3. O da yoksa "auto" kullan.
+    // Dil Seçimi
     std::string target_lang = language;
     if (target_lang.empty()) {
         target_lang = settings_.language;
     }    
-
     wparams.language = settings_.language.c_str();    
     
-    // Advanced Settings (Config'den)
+    // Advanced Settings
     wparams.temperature = settings_.temperature;
     
     if (strategy == WHISPER_SAMPLING_BEAM_SEARCH) {
         wparams.beam_search.beam_size = settings_.beam_size;
-        // best_of, whisper.cpp'de greedy için geçerli olabilir, API kontrol edilmeli
-        // wparams.greedy.best_of = settings_.best_of; 
     } else {
         wparams.greedy.best_of = settings_.best_of;
     }
 
-    // Thresholds
-    wparams.entropy_thold = 2.40f; // Varsayılan iyi bir değer
+    wparams.entropy_thold = 2.40f;
     wparams.logprob_thold = settings_.logprob_threshold;
-    wparams.no_speech_thold = settings_.no_speech_threshold; // VAD Hassasiyeti
+    wparams.no_speech_thold = settings_.no_speech_threshold;
 
-    // ---------------------------------------
-
+    // Inference
     if (whisper_full(ctx_, wparams, processed_audio.data(), processed_audio.size()) != 0) {
         spdlog::error("Whisper failed to process audio");
         return {};
     }
     
-    // ... (Sonuç toplama aynı)
+    // Sonuç Toplama
     std::vector<TranscriptionResult> results;
     const int n_segments = whisper_full_n_segments(ctx_);
+    
     for (int i = 0; i < n_segments; ++i) {
         const char* text = whisper_full_get_segment_text(ctx_, i);
         const int64_t t0 = whisper_full_get_segment_t0(ctx_, i);
         const int64_t t1 = whisper_full_get_segment_t1(ctx_, i);
         
-        // Olasılık hesaplama eksiği vardı, onu da basitçe tamamlayalım
-        // Whisper segment probu vermiyor ama token probu veriyor. Şimdilik 1.0 kalsın.
-        results.push_back({std::string(text), target_lang, 1.0f, t0, t1});
+        // --- YENİ: Token Extraction ---
+        std::vector<TokenData> tokens;
+        int n_tokens = whisper_full_n_tokens(ctx_, i);
+        
+        for (int j = 0; j < n_tokens; ++j) {
+            auto data = whisper_full_get_token_data(ctx_, i, j);
+            const char* token_text = whisper_token_to_str(ctx_, data.id);
+            
+            // Özel tokenları filtrele (örn: [BEG], [NOTIMESTAMP] vb.)
+            if (data.id >= whisper_token_eot(ctx_)) continue; 
+
+            tokens.push_back({
+                std::string(token_text),
+                data.p,
+                data.t0,
+                data.t1
+            });
+        }
+        // ------------------------------
+
+        results.push_back({std::string(text), target_lang, 1.0f, t0, t1, tokens});
     }
+    
     return results;
 }

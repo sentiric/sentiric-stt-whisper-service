@@ -48,7 +48,7 @@ void HttpServer::setup_routes() {
             {"status", ready ? "healthy" : "unhealthy"},
             {"model_ready", ready},
             {"service", "sentiric-stt-whisper-service"},
-            {"version", "2.0.0"},
+            {"version", "2.1.0"}, // Versiyonu artırdık
             {"api_compatibility", "openai-whisper"}
         };
         res.set_header("Access-Control-Allow-Origin", "*");
@@ -75,7 +75,6 @@ void HttpServer::setup_routes() {
 
         const auto& file = req.get_file_value("file");
         
-        // Dil parametresini kontrol et (form data veya query param)
         std::string lang = "";
         if (req.has_file("language")) {
             lang = req.get_file_value("language").content;
@@ -87,14 +86,12 @@ void HttpServer::setup_routes() {
             auto start_time = std::chrono::steady_clock::now();
             
             auto pcm16 = parse_wav(file.content);
-            
-            // Dil parametresini engine'e ilet
             auto results = engine_->transcribe_pcm16(pcm16, 16000, lang);
 
             auto end_time = std::chrono::steady_clock::now();
             std::chrono::duration<double> processing_time = end_time - start_time;
 
-            // Sonucu birleştir
+            // JSON Response Construction
             std::string full_text;
             std::string detected_lang = "unknown";
             json segments = json::array();
@@ -102,11 +99,24 @@ void HttpServer::setup_routes() {
             for (const auto& r : results) {
                 full_text += r.text;
                 detected_lang = r.language;
+                
+                // Kelime detaylarını oluştur
+                json words_json = json::array();
+                for (const auto& t : r.tokens) {
+                    words_json.push_back({
+                        {"word", t.text},
+                        {"start", (double)t.t0 / 100.0}, // whisper.cpp bazen 10ms birimi kullanır, kontrol edilmeli. Genelde 10ms.
+                        {"end", (double)t.t1 / 100.0},
+                        {"probability", t.p}
+                    });
+                }
+
                 segments.push_back({
                     {"text", r.text},
-                    {"start", (double)r.t0 / 1000.0},
-                    {"end", (double)r.t1 / 1000.0},
-                    {"probability", r.prob}
+                    {"start", (double)r.t0 / 100.0}, // 10ms -> saniye
+                    {"end", (double)r.t1 / 100.0},   // 10ms -> saniye
+                    {"probability", r.prob},
+                    {"words", words_json} // YENİ: Word-level timestamps
                 });
             }
 
@@ -114,17 +124,15 @@ void HttpServer::setup_routes() {
             metrics_.audio_seconds_processed_total.Increment(duration);
             metrics_.request_latency.Observe(processing_time.count());
 
-            // OpenAI Uyumlu Yanıt Formatı + Extra Metadata
             json response = {
                 {"text", full_text},
                 {"language", detected_lang},
                 {"duration", duration},
-                {"segments", segments}, // Detaylı segmentler
-                // Sentiric Özel Metadata
+                {"segments", segments},
                 {"meta", {
                     {"processing_time", processing_time.count()},
-                    {"rtf", processing_time.count() / (duration > 0 ? duration : 1.0)}, // Real Time Factor
-                    {"device", "native-cpp"}
+                    {"rtf", processing_time.count() / (duration > 0 ? duration : 1.0)},
+                    {"device", "native-cpp-v2.1"}
                 }}
             };
 
@@ -140,7 +148,6 @@ void HttpServer::setup_routes() {
         }
     };
 
-    // 4. Endpointler
     // Kendi standardımız
     svr_.Post("/v1/transcribe", transcribe_handler);
     
