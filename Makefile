@@ -15,7 +15,7 @@ up-cpu:
 
 up-gpu:
 	# GPU için de override dosyasını eklemek iyi fikirdir.
-	docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.override.yml up --build -d
+	docker compose -f docker-compose.yml -f docker-compose.gpu.yml  up --build -d
 
 down:
 	# Down ederken de tüm dosyaları belirtmek en temizidir.

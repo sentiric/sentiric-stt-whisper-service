@@ -87,40 +87,58 @@ std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(const std::vector<i
 }
 
 std::vector<TranscriptionResult> SttEngine::transcribe(const std::vector<float>& pcmf32, int input_sample_rate) {
-    std::lock_guard<std::mutex> lock(mutex_); // Context'i kilitle
+    std::lock_guard<std::mutex> lock(mutex_); 
 
     if (!ctx_) return {};
 
-    // Eğer transcribe metoduna doğrudan float vektör geldiyse ve sample rate farklıysa burada da resample yapmalıyız.
-    // Ancak const referans olduğu için kopyalamamız gerekir.
+    // Resampling (Aynı)
     std::vector<float> processed_audio;
     if (input_sample_rate != 16000) {
         processed_audio = resample_audio(pcmf32, input_sample_rate, 16000);
     } else {
-        processed_audio = pcmf32; // Copy (Maliyetli olabilir ama güvenli)
+        processed_audio = pcmf32;
     }
 
-    // Whisper parametrelerini ayarla
-    whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    // --- PARAMETRE ENTEGRASYONU (YENİ) ---
+    // Config'den gelen değerleri whisper_full_params'a aktarıyoruz.
     
-    wparams.strategy = WHISPER_SAMPLING_GREEDY;
+    // Strateji seçimi: Beam Size > 1 ise BEAM_SEARCH kullan
+    whisper_sampling_strategy strategy = (settings_.beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
+    whisper_full_params wparams = whisper_full_default_params(strategy);
+    
     wparams.print_realtime = false;
     wparams.print_progress = false;
     wparams.print_timestamps = !settings_.no_timestamps;
     wparams.print_special = false;
+    
     wparams.translate = settings_.translate;
     wparams.language = settings_.language.c_str();
     wparams.n_threads = settings_.n_threads;
     
-    // VAD (Voice Activity Detection) - Boş sesleri atla
-    wparams.no_speech_thold = 0.6f; 
+    // Advanced Settings (Config'den)
+    wparams.temperature = settings_.temperature;
+    
+    if (strategy == WHISPER_SAMPLING_BEAM_SEARCH) {
+        wparams.beam_search.beam_size = settings_.beam_size;
+        // best_of, whisper.cpp'de greedy için geçerli olabilir, API kontrol edilmeli
+        // wparams.greedy.best_of = settings_.best_of; 
+    } else {
+        wparams.greedy.best_of = settings_.best_of;
+    }
 
-    // Transkripsiyonu çalıştır
+    // Thresholds
+    wparams.entropy_thold = 2.40f; // Varsayılan iyi bir değer
+    wparams.logprob_thold = settings_.logprob_threshold;
+    wparams.no_speech_thold = settings_.no_speech_threshold; // VAD Hassasiyeti
+
+    // ---------------------------------------
+
     if (whisper_full(ctx_, wparams, processed_audio.data(), processed_audio.size()) != 0) {
         spdlog::error("Whisper failed to process audio");
         return {};
     }
 
+    // ... (Sonuç toplama kısmı aynı) ...
     std::vector<TranscriptionResult> results;
     const int n_segments = whisper_full_n_segments(ctx_);
     
@@ -129,7 +147,9 @@ std::vector<TranscriptionResult> SttEngine::transcribe(const std::vector<float>&
         const int64_t t0 = whisper_full_get_segment_t0(ctx_, i);
         const int64_t t1 = whisper_full_get_segment_t1(ctx_, i);
         
-        // Olasılık (confidence) hesabı
+        // Olasılık (confidence) hesabı - Segment bazlı
+        // whisper.cpp API'sinde segment olasılığı doğrudan yok, token'lardan hesaplanabilir
+        // Şimdilik dummy bırakıyoruz veya loglardan okuyoruz.
         float prob = 1.0f; 
 
         results.push_back({std::string(text), settings_.language, prob, t0, t1});
