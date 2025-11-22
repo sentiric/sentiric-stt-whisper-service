@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <numeric>
 
-
 SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
     spdlog::info("Loading Whisper model from: {}", model_path);
@@ -90,21 +89,19 @@ bool SttEngine::is_speech_detected(const std::vector<float>& pcmf32) {
 std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
     const std::vector<int16_t>& pcm16, 
     int input_sample_rate,
-    const std::string& language,
-    const std::string& prompt
+    const RequestOptions& options
 ) {
     std::vector<float> pcmf32(pcm16.size());
     for (size_t i = 0; i < pcm16.size(); ++i) {
         pcmf32[i] = static_cast<float>(pcm16[i]) / 32768.0f;
     }
-    return transcribe(pcmf32, input_sample_rate, language, prompt);
+    return transcribe(pcmf32, input_sample_rate, options);
 }
 
 std::vector<TranscriptionResult> SttEngine::transcribe(
     const std::vector<float>& pcmf32, 
     int input_sample_rate,
-    const std::string& language,
-    const std::string& prompt
+    const RequestOptions& options
 ) {
     if (!ctx_) return {};
 
@@ -130,7 +127,12 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
 
     struct whisper_state* state = acquire_state();
 
-    whisper_sampling_strategy strategy = (settings_.beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
+    // Strateji Belirleme (Config vs Request)
+    int active_beam_size = (options.beam_size >= 0) ? options.beam_size : settings_.beam_size;
+    float active_temp = (options.temperature >= 0.0f) ? options.temperature : settings_.temperature;
+    int active_best_of = (options.best_of >= 0) ? options.best_of : settings_.best_of;
+
+    whisper_sampling_strategy strategy = (active_beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
     whisper_full_params wparams = whisper_full_default_params(strategy);
     
     wparams.print_realtime = false;
@@ -140,29 +142,29 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.token_timestamps = true; 
     wparams.suppress_nst = settings_.suppress_nst; 
     wparams.no_speech_thold = settings_.no_speech_threshold; 
-    wparams.translate = settings_.translate;
-    wparams.n_threads = settings_.n_threads;
-    wparams.tdrz_enable = settings_.enable_diarization; 
+    
+    // --- REQUEST OVERRIDES ---
+    wparams.translate = options.translate; // Request öncelikli (default false)
+    wparams.tdrz_enable = options.enable_diarization; // Request öncelikli
 
-    std::string target_lang = language;
+    std::string target_lang = options.language;
     if (target_lang.empty()) target_lang = settings_.language;
     wparams.language = target_lang.c_str();    
     
-    // --- YENİ: Prompt Entegrasyonu ---
-    if (!prompt.empty()) {
-        wparams.initial_prompt = prompt.c_str();
+    if (!options.prompt.empty()) {
+        wparams.initial_prompt = options.prompt.c_str();
     }
-    // --------------------------------
-
-    wparams.temperature = settings_.temperature;
+    
+    wparams.temperature = active_temp;
     
     if (strategy == WHISPER_SAMPLING_BEAM_SEARCH) {
-        wparams.beam_search.beam_size = settings_.beam_size;
+        wparams.beam_search.beam_size = active_beam_size;
     } else {
-        wparams.greedy.best_of = settings_.best_of;
+        wparams.greedy.best_of = active_best_of;
     }
     wparams.entropy_thold = 2.40f;
     wparams.logprob_thold = settings_.logprob_threshold;
+    wparams.n_threads = settings_.n_threads;
 
     int ret = whisper_full_with_state(ctx_, state, wparams, processed_audio.data(), processed_audio.size());
     

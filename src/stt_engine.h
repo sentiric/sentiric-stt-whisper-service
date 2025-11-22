@@ -9,11 +9,25 @@
 #include <queue>
 #include <condition_variable>
 
+// Token verisi
 struct TokenData {
     std::string text;
     float p;       
     int64_t t0;    
     int64_t t1;    
+};
+
+// İstek bazında özelleştirilebilir parametreler (Pro Özellikler)
+struct RequestOptions {
+    std::string language = "";      // Boş ise auto-detect
+    std::string prompt = "";        // Context/İpucu
+    bool translate = false;         // X -> English çeviri
+    bool enable_diarization = false;// Konuşmacı ayrıştırma
+    
+    // Gelişmiş (Advanced)
+    float temperature = -1.0f;      // -1 ise varsayılanı kullan
+    int beam_size = -1;             // -1 ise varsayılanı kullan
+    int best_of = -1;               // -1 ise varsayılanı kullan
 };
 
 struct TranscriptionResult {
@@ -33,19 +47,17 @@ public:
 
     bool is_ready() const;
 
-    // GÜNCELLENDİ: prompt parametresi eklendi
+    // Yeni İmza: Parametreler struct içinde toplanmıştır
     std::vector<TranscriptionResult> transcribe(
         const std::vector<float>& pcmf32, 
-        int input_sample_rate = 16000,
-        const std::string& language = "",
-        const std::string& prompt = "" 
+        int input_sample_rate,
+        const RequestOptions& options
     );
 
     std::vector<TranscriptionResult> transcribe_pcm16(
         const std::vector<int16_t>& pcm16, 
-        int input_sample_rate = 16000,
-        const std::string& language = "",
-        const std::string& prompt = ""
+        int input_sample_rate,
+        const RequestOptions& options
     );
 
 private:
