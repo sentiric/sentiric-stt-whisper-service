@@ -2,6 +2,7 @@
 #include "spdlog/spdlog.h"
 #include <chrono>
 #include <vector>
+#include <cstring> // std::memcpy
 
 GrpcServer::GrpcServer(std::shared_ptr<SttEngine> engine, AppMetrics& metrics)
     : engine_(std::move(engine)), metrics_(metrics) {}
@@ -11,7 +12,7 @@ grpc::Status GrpcServer::WhisperTranscribe(
     const sentiric::stt::v1::WhisperTranscribeRequest* request,
     sentiric::stt::v1::WhisperTranscribeResponse* response) {
     
-    (void)context; // Unused parameter warning'i önle
+    (void)context; 
     metrics_.requests_total.Increment();
     auto start_time = std::chrono::steady_clock::now();
 
@@ -19,28 +20,26 @@ grpc::Status GrpcServer::WhisperTranscribe(
         return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Model not ready");
     }
 
-    // Gelen bytes -> int16_t dönüşümü
-    // Varsayım: Gelen veri 16-bit PCM
     const std::string& audio_data = request->audio_data();
     if (audio_data.size() % 2 != 0) {
         return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Audio data length must be even (16-bit PCM)");
     }
 
-    // Ses verisini kopyala
     std::vector<int16_t> pcm16(audio_data.size() / 2);
     std::memcpy(pcm16.data(), audio_data.data(), audio_data.size());
 
-    // --- FIX: İSTEKTEN DİLİ AL ---
-    std::string req_lang = "";
+    // --- FIX: RequestOptions Hazırlığı ---
+    RequestOptions options;
     if (request->has_language()) {
-        req_lang = request->language();
+        options.language = request->language();
     }
-    // -----------------------------
+    // Gelecekte gRPC proto'ya temperature vb. eklenirse buraya maplenecek.
+    // Şimdilik varsayılan (default) ayarları kullanıyoruz.
+    // -------------------------------------
 
-    // Motoru çağır (Dil parametresiyle)
-    auto results = engine_->transcribe_pcm16(pcm16, 16000, req_lang);
+    // Motoru yeni imza ile çağır
+    auto results = engine_->transcribe_pcm16(pcm16, 16000, options);
 
-    // Sonucu birleştir
     std::string full_text;
     float avg_prob = 0.0f;
     
@@ -54,17 +53,15 @@ grpc::Status GrpcServer::WhisperTranscribe(
     response->set_language(results.empty() ? "unknown" : results[0].language);
     response->set_language_probability(avg_prob);
     
-    // Süre hesapla
-    double duration_sec = (double)pcm16.size() / 16000.0; // 16kHz varsayımı
+    double duration_sec = (double)pcm16.size() / 16000.0; 
     response->set_duration(duration_sec);
 
-    // Metrikleri güncelle
     metrics_.audio_seconds_processed_total.Increment(duration_sec);
     auto end_time = std::chrono::steady_clock::now();
     std::chrono::duration<double> latency = end_time - start_time;
     metrics_.request_latency.Observe(latency.count());
 
-    spdlog::info("Processed audio: {:.2f}s, Latency: {:.2f}s, Text: {}", duration_sec, latency.count(), full_text);
+    spdlog::info("gRPC Unary: {:.2f}s Audio, Latency: {:.2f}s", duration_sec, latency.count());
 
     return grpc::Status::OK;
 }
@@ -83,9 +80,8 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     sentiric::stt::v1::WhisperTranscribeStreamRequest request;
     std::vector<int16_t> full_pcm_buffer;
 
-    spdlog::info("Starting streaming transcription...");
+    spdlog::info("Starting gRPC streaming transcription...");
 
-    // 1. ADIM: Tüm veriyi al (Buffered Streaming)
     while (stream->Read(&request)) {
         const std::string& chunk = request.audio_chunk();
         if (chunk.empty()) continue;
@@ -101,18 +97,21 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
         return grpc::Status::CANCELLED;
     }
 
-    // 2. ADIM: Toplu İşle
-    auto results = engine_->transcribe_pcm16(full_pcm_buffer);
+    // --- FIX: RequestOptions Hazırlığı ---
+    RequestOptions options;
+    // Streaming modunda dil genellikle "auto" bırakılır veya ilk pakette gönderilir.
+    // Şimdilik varsayılanları kullanıyoruz.
+    // -------------------------------------
 
-    // 3. ADIM: Sonuçları Parça Parça Gönder
+    auto results = engine_->transcribe_pcm16(full_pcm_buffer, 16000, options);
+
     for (size_t i = 0; i < results.size(); ++i) {
         sentiric::stt::v1::WhisperTranscribeStreamResponse response;
         response.set_transcription(results[i].text);
-        response.set_is_final(i == results.size() - 1); // Son parça mı?
+        response.set_is_final(i == results.size() - 1); 
         stream->Write(response);
     }
 
-    // Metrik
     double duration_sec = (double)full_pcm_buffer.size() / 16000.0;
     metrics_.audio_seconds_processed_total.Increment(duration_sec);
     
@@ -120,7 +119,7 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     std::chrono::duration<double> latency = end_time - start_time;
     metrics_.request_latency.Observe(latency.count());
 
-    spdlog::info("Stream finished. Total Audio: {:.2f}s, Latency: {:.2f}s", duration_sec, latency.count());
+    spdlog::info("gRPC Stream Finished. Total Audio: {:.2f}s", duration_sec);
 
     return grpc::Status::OK;
 }
