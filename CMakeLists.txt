@@ -90,6 +90,7 @@ target_link_libraries(proto_lib PUBLIC gRPC::grpc++ protobuf::libprotobuf)
 add_executable(stt_service
     src/main.cpp
     src/stt_engine.cpp
+    src/model_manager.cpp # EKLENDİ
     src/grpc_server.cpp
     src/http_server.cpp
 )

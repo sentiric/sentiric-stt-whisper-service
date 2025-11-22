@@ -10,8 +10,8 @@
 #include <sstream>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
+#include "model_manager.h" // EKLENDİ
 
-// --- DÜZELTME 1: spdlog sink header'ı eklendi ---
 #include "spdlog/sinks/stdout_color_sinks.h" 
 // -----------------------------------------------
 
@@ -44,6 +44,7 @@ std::string read_file(const std::string& filepath) {
     buffer << file.rdbuf();
     return buffer.str();
 }
+
 
 int main() {
     // Loglama Başlat
@@ -84,6 +85,13 @@ int main() {
     AppMetrics metrics = {req_total, req_latency, audio_sec};
 
     try {
+        // --- YENİ: Model Manager Entegrasyonu ---
+        // Servis başlamadan önce modelin hazır olduğundan emin ol
+        std::string model_path = ModelManager::ensure_model(settings);
+        // Engine artık sadece path'i bilse yeterli olur ama config'den alıyor.
+        // Config zaten doğru path'i gösteriyor olmalı.
+        // ----------------------------------------
+
         auto engine = std::make_shared<SttEngine>(settings);
 
         grpc::EnableDefaultHealthCheckService(true);
