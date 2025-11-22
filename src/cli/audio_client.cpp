@@ -1,8 +1,46 @@
 #include "audio_client.h"
 #include "spdlog/spdlog.h"
+#include "fmt/format.h" // fmt::formatter için gerekli
 #include <fstream>
 #include <vector>
 #include <thread>
+#include <string_view>
+
+// --- FMT FORMATTER SPECIALIZATION (DÜZELTME) ---
+// grpc::StatusCode enum'ını string'e çevirmek için öğretici.
+template <>
+struct fmt::formatter<grpc::StatusCode> {
+    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const grpc::StatusCode& code, FormatContext& ctx) const -> decltype(ctx.out()) {
+        std::string_view name = "UNKNOWN";
+        switch (code) {
+            case grpc::StatusCode::OK: name = "OK"; break;
+            case grpc::StatusCode::CANCELLED: name = "CANCELLED"; break;
+            case grpc::StatusCode::UNKNOWN: name = "UNKNOWN"; break;
+            case grpc::StatusCode::INVALID_ARGUMENT: name = "INVALID_ARGUMENT"; break;
+            case grpc::StatusCode::DEADLINE_EXCEEDED: name = "DEADLINE_EXCEEDED"; break;
+            case grpc::StatusCode::NOT_FOUND: name = "NOT_FOUND"; break;
+            case grpc::StatusCode::ALREADY_EXISTS: name = "ALREADY_EXISTS"; break;
+            case grpc::StatusCode::PERMISSION_DENIED: name = "PERMISSION_DENIED"; break;
+            case grpc::StatusCode::UNAUTHENTICATED: name = "UNAUTHENTICATED"; break;
+            case grpc::StatusCode::RESOURCE_EXHAUSTED: name = "RESOURCE_EXHAUSTED"; break;
+            case grpc::StatusCode::FAILED_PRECONDITION: name = "FAILED_PRECONDITION"; break;
+            case grpc::StatusCode::ABORTED: name = "ABORTED"; break;
+            case grpc::StatusCode::OUT_OF_RANGE: name = "OUT_OF_RANGE"; break;
+            case grpc::StatusCode::UNIMPLEMENTED: name = "UNIMPLEMENTED"; break;
+            case grpc::StatusCode::INTERNAL: name = "INTERNAL"; break;
+            case grpc::StatusCode::UNAVAILABLE: name = "UNAVAILABLE"; break;
+            case grpc::StatusCode::DATA_LOSS: name = "DATA_LOSS"; break;
+            default: break;
+        }
+        return fmt::format_to(ctx.out(), "{} ({})", name, static_cast<int>(code));
+    }
+};
+// -----------------------------------------------
 
 AudioClient::AudioClient(const std::string& address) {
     // CLI için şimdilik Insecure channel yeterli, prod CLI için SSL eklenebilir
@@ -52,7 +90,7 @@ void AudioClient::transcribe_file(const std::string& filepath) {
             spdlog::info("Lang: {} (Prob: {:.2f})", response.language(), response.language_probability());
             spdlog::info("Duration: {:.2f}s", response.duration());
         } else {
-            spdlog::error("RPC Failed: {} - {}", status.error_code(), status.error_message());
+            spdlog::error("RPC Failed: {}", status.error_code()); // ARTIK ÇALIŞACAK
         }
     } catch (const std::exception& e) {
         spdlog::error("Client Error: {}", e.what());
