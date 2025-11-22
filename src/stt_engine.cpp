@@ -7,7 +7,7 @@
 #include <numeric>
 
 SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
-    // 1. Ana Model Yükleme (Shared Context)
+    // 1. Ana Model Yükleme
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
     spdlog::info("Loading Whisper model from: {}", model_path);
 
@@ -28,8 +28,7 @@ SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
         throw std::runtime_error("Whisper model initialization failed");
     }
 
-    // 2. Dynamic Batching: State Havuzu Oluşturma
-    // Her state, ayrı bir GPU stream'i üzerinde çalışabilir.
+    // 2. Dynamic Batching Pool
     int pool_size = settings_.parallel_requests;
     if (pool_size < 1) pool_size = 1;
     
@@ -51,7 +50,7 @@ SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
         spdlog::info("Loading VAD model from: {}", vad_path);
         
         struct whisper_vad_context_params vparams = whisper_vad_default_context_params();
-        vparams.use_gpu = false; // CPU Zorunlu
+        vparams.use_gpu = false; 
         
         vad_ctx_ = whisper_vad_init_from_file_with_params(vad_path.c_str(), vparams);
         
@@ -64,31 +63,16 @@ SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
 }
 
 SttEngine::~SttEngine() {
-    // Havuzu temizle
-    for(auto* state : all_states_) {
-        whisper_free_state(state);
-    }
-    
-    if (ctx_) {
-        whisper_free(ctx_);
-        ctx_ = nullptr;
-    }
-    if (vad_ctx_) {
-        whisper_vad_free(vad_ctx_);
-        vad_ctx_ = nullptr;
-    }
+    for(auto* state : all_states_) whisper_free_state(state);
+    if (ctx_) whisper_free(ctx_);
+    if (vad_ctx_) whisper_vad_free(vad_ctx_);
 }
 
-bool SttEngine::is_ready() const {
-    return ctx_ != nullptr;
-}
+bool SttEngine::is_ready() const { return ctx_ != nullptr; }
 
-// --- Pool Management ---
 struct whisper_state* SttEngine::acquire_state() {
     std::unique_lock<std::mutex> lock(pool_mutex_);
-    // Havuzda boş yer olana kadar bekle
     pool_cv_.wait(lock, [this]{ return !state_pool_.empty(); });
-    
     struct whisper_state* state = state_pool_.front();
     state_pool_.pop();
     return state;
@@ -97,9 +81,8 @@ struct whisper_state* SttEngine::acquire_state() {
 void SttEngine::release_state(struct whisper_state* state) {
     std::lock_guard<std::mutex> lock(pool_mutex_);
     state_pool_.push(state);
-    pool_cv_.notify_one(); // Bekleyen varsa uyandır
+    pool_cv_.notify_one();
 }
-// -----------------------
 
 std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, int src_rate, int target_rate) {
     if (src_rate == target_rate || input.empty()) return input;
@@ -121,7 +104,7 @@ std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, in
 
 bool SttEngine::is_speech_detected(const std::vector<float>& pcmf32) {
     if (!vad_ctx_) return true; 
-    std::lock_guard<std::mutex> lock(vad_mutex_); // VAD için hafif kilit
+    std::lock_guard<std::mutex> lock(vad_mutex_);
     return whisper_vad_detect_speech(vad_ctx_, pcmf32.data(), (int)pcmf32.size());
 }
 
@@ -142,12 +125,8 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     int input_sample_rate,
     const std::string& language
 ) {
-    // Bu fonksiyon artık "Global Mutex" kullanmıyor!
-    // Böylece aynı anda birden fazla thread buraya girebilir.
-
     if (!ctx_) return {};
 
-    // 1. Pre-processing (Thread-Local)
     std::vector<float> processed_audio;
     if (input_sample_rate != 16000) {
         processed_audio = resample_audio(pcmf32, input_sample_rate, 16000);
@@ -155,28 +134,24 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         processed_audio = pcmf32;
     }
 
-    // 2. VAD Check (CPU - Fast - protected by vad_mutex)
     if (settings_.enable_vad && processed_audio.size() > (16000 * 0.2)) { 
         if (!is_speech_detected(processed_audio)) {
-            // Sessizlik için erken dönüş
             TranscriptionResult empty_res;
             empty_res.text = "";
             empty_res.language = "unknown";
             empty_res.prob = 0.0f;
             empty_res.t0 = 0;
             empty_res.t1 = (int64_t)((double)processed_audio.size() / 16.0); 
+            empty_res.speaker_turn_next = false;
             return {empty_res}; 
         }
     }
 
-    // 3. Acquire State (Concurrency Bottleneck - only if pool is empty)
     struct whisper_state* state = acquire_state();
 
-    // 4. Inference (GPU - Parallel Exec)
     whisper_sampling_strategy strategy = (settings_.beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
     whisper_full_params wparams = whisper_full_default_params(strategy);
     
-    // ... (Params aynı) ...
     wparams.print_realtime = false;
     wparams.print_progress = false;
     wparams.print_timestamps = !settings_.no_timestamps;
@@ -186,6 +161,9 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.no_speech_thold = settings_.no_speech_threshold; 
     wparams.translate = settings_.translate;
     wparams.n_threads = settings_.n_threads;
+    
+    // YENİ: Speaker Diarization Enable
+    wparams.tdrz_enable = settings_.enable_diarization; 
 
     std::string target_lang = language;
     if (target_lang.empty()) target_lang = settings_.language;
@@ -200,7 +178,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.entropy_thold = 2.40f;
     wparams.logprob_thold = settings_.logprob_threshold;
 
-    // KRİTİK DEĞİŞİKLİK: whisper_full yerine whisper_full_with_state
     int ret = whisper_full_with_state(ctx_, state, wparams, processed_audio.data(), processed_audio.size());
     
     std::vector<TranscriptionResult> results;
@@ -214,6 +191,9 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             const int64_t t0 = whisper_full_get_segment_t0_from_state(state, i);
             const int64_t t1 = whisper_full_get_segment_t1_from_state(state, i);
             
+            // YENİ: Speaker Turn tespiti
+            bool speaker_turn = whisper_full_get_segment_speaker_turn_next_from_state(state, i);
+
             std::vector<TokenData> tokens;
             int n_tokens = whisper_full_n_tokens_from_state(state, i);
             double total_prob = 0.0;
@@ -232,14 +212,12 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             float avg_prob = (valid_token_count > 0) ? (float)(total_prob / valid_token_count) : 0.0f;
             if (avg_prob < MIN_AVG_TOKEN_PROB && valid_token_count > 0) continue;
 
-            results.push_back({std::string(text), target_lang, avg_prob, t0, t1, tokens});
+            results.push_back({std::string(text), target_lang, avg_prob, t0, t1, speaker_turn, tokens});
         }
     } else {
         spdlog::error("Whisper processing failed.");
     }
 
-    // 5. Release State
     release_state(state);
-    
     return results;
 }

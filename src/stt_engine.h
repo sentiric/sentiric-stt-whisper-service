@@ -22,6 +22,7 @@ struct TranscriptionResult {
     float prob;
     int64_t t0; 
     int64_t t1; 
+    bool speaker_turn_next; // YENİ: Bu segmentten sonra konuşmacı değişti mi?
     std::vector<TokenData> tokens; 
 };
 
@@ -48,20 +49,17 @@ private:
     std::vector<float> resample_audio(const std::vector<float>& input, int src_rate, int target_rate);
     bool is_speech_detected(const std::vector<float>& pcmf32);
 
-    // Yardımcı: Havuzdan boş bir state al
     struct whisper_state* acquire_state();
-    // Yardımcı: State'i havuza geri bırak
     void release_state(struct whisper_state* state);
 
     Settings settings_;
-    struct whisper_context* ctx_ = nullptr; // Ana Model (Shared Read-Only)
+    struct whisper_context* ctx_ = nullptr;
     struct whisper_vad_context* vad_ctx_ = nullptr;
     
-    // --- Dynamic Batching: State Pool ---
-    std::queue<struct whisper_state*> state_pool_; // Boştaki state'ler
+    std::queue<struct whisper_state*> state_pool_; 
     std::mutex pool_mutex_;
     std::condition_variable pool_cv_;
-    std::vector<struct whisper_state*> all_states_; // Temizlik için tüm state referansları
+    std::vector<struct whisper_state*> all_states_; 
 
-    std::mutex vad_mutex_; // VAD thread-safe olmayabilir, koruyoruz.
+    std::mutex vad_mutex_;
 };

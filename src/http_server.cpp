@@ -7,8 +7,6 @@
 
 using json = nlohmann::json;
 
-// --- UTF-8 Sanitizer (Helper) ---
-// Modelden gelen bozuk byte dizilerini temizler, JSON crash'ini önler.
 std::string clean_utf8(const std::string& str) {
     std::string res;
     res.reserve(str.size());
@@ -16,39 +14,21 @@ std::string clean_utf8(const std::string& str) {
     while (i < str.size()) {
         unsigned char c = str[i];
         int n;
-        // UTF-8 byte uzunluğu tespiti
-        if      (c < 0x80) n = 1;             // 0xxxxxxx
-        else if ((c & 0xE0) == 0xC0) n = 2;   // 110xxxxx
-        else if ((c & 0xF0) == 0xE0) n = 3;   // 1110xxxx
-        else if ((c & 0xF8) == 0xF0) n = 4;   // 11110xxx
-        else {
-            // Geçersiz başlangıç byte'ı, atla
-            i++; continue; 
-        }
-
-        if (i + n > str.size()) break; // String sonu hatası
-        
-        // Takip eden byte'ları kontrol et (10xxxxxx)
+        if      (c < 0x80) n = 1;             
+        else if ((c & 0xE0) == 0xC0) n = 2;   
+        else if ((c & 0xF0) == 0xE0) n = 3;   
+        else if ((c & 0xF8) == 0xF0) n = 4;   
+        else { i++; continue; }
+        if (i + n > str.size()) break; 
         bool valid = true;
         for (int j = 1; j < n; j++) {
-            if ((str[i + j] & 0xC0) != 0x80) {
-                valid = false;
-                break;
-            }
+            if ((str[i + j] & 0xC0) != 0x80) { valid = false; break; }
         }
-
-        if (valid) {
-            res.append(str, i, n);
-            i += n;
-        } else {
-            i++; // Geçersiz dizi, sadece ilk byte'ı atla ve devam et
-        }
+        if (valid) { res.append(str, i, n); i += n; } else { i++; }
     }
     return res;
 }
-// --------------------------------
 
-// --- Metrics Server ---
 MetricsServer::MetricsServer(const std::string& host, int port, prometheus::Registry& registry)
     : host_(host), port_(port), registry_(registry) {
     svr_.Get("/metrics", [this](const httplib::Request &, httplib::Response &res) {
@@ -69,27 +49,24 @@ void MetricsServer::stop() {
     if (svr_.is_running()) svr_.stop();
 }
 
-// --- Main HTTP Server ---
 HttpServer::HttpServer(std::shared_ptr<SttEngine> engine, AppMetrics& metrics, const std::string& host, int port)
     : engine_(std::move(engine)), metrics_(metrics), host_(host), port_(port) {
     setup_routes();
 }
 
 void HttpServer::setup_routes() {
-    // 1. Statik Dosyalar (Omni-Studio)
     auto ret = svr_.set_mount_point("/", "./studio");
     if (!ret) {
         spdlog::warn("⚠️ Could not mount ./studio directory. UI might not work.");
     }
 
-    // 2. Health Check
     svr_.Get("/health", [this](const httplib::Request &, httplib::Response &res) {
         bool ready = engine_->is_ready();
         json response = {
             {"status", ready ? "healthy" : "unhealthy"},
             {"model_ready", ready},
             {"service", "sentiric-stt-whisper-service"},
-            {"version", "2.1.1"}, // Patch version update
+            {"version", "2.2.0"}, // Version Bump
             {"api_compatibility", "openai-whisper"}
         };
         res.set_header("Access-Control-Allow-Origin", "*");
@@ -97,7 +74,6 @@ void HttpServer::setup_routes() {
         res.status = ready ? 200 : 503;
     });
 
-    // 3. Transcribe Handler
     auto transcribe_handler = [this](const httplib::Request &req, httplib::Response &res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         metrics_.requests_total.Increment();
@@ -115,7 +91,6 @@ void HttpServer::setup_routes() {
         }
 
         const auto& file = req.get_file_value("file");
-        
         std::string lang = "";
         if (req.has_file("language")) {
             lang = req.get_file_value("language").content;
@@ -125,10 +100,8 @@ void HttpServer::setup_routes() {
 
         try {
             auto start_time = std::chrono::steady_clock::now();
-            
             auto pcm16 = parse_wav(file.content);
             auto results = engine_->transcribe_pcm16(pcm16, 16000, lang);
-
             auto end_time = std::chrono::steady_clock::now();
             std::chrono::duration<double> processing_time = end_time - start_time;
 
@@ -137,16 +110,14 @@ void HttpServer::setup_routes() {
             json segments = json::array();
             
             for (const auto& r : results) {
-                // DÜZELTME: UTF-8 Temizliği
                 std::string safe_text = clean_utf8(r.text);
                 full_text += safe_text;
-                
                 detected_lang = r.language;
                 
                 json words_json = json::array();
                 for (const auto& t : r.tokens) {
                     words_json.push_back({
-                        {"word", clean_utf8(t.text)}, // Token text'i de temizle
+                        {"word", clean_utf8(t.text)},
                         {"start", (double)t.t0 / 100.0},
                         {"end", (double)t.t1 / 100.0},
                         {"probability", t.p}
@@ -158,6 +129,7 @@ void HttpServer::setup_routes() {
                     {"start", (double)r.t0 / 100.0},
                     {"end", (double)r.t1 / 100.0},
                     {"probability", r.prob},
+                    {"speaker_turn_next", r.speaker_turn_next}, // YENİ ALAN
                     {"words", words_json}
                 });
             }
@@ -174,7 +146,7 @@ void HttpServer::setup_routes() {
                 {"meta", {
                     {"processing_time", processing_time.count()},
                     {"rtf", processing_time.count() / (duration > 0 ? duration : 1.0)},
-                    {"device", "native-cpp-v2.1.1"}
+                    {"device", "native-cpp-v2.2.0"}
                 }}
             };
 

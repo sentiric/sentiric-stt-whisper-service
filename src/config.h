@@ -21,15 +21,13 @@ struct Settings {
     // --- VAD Settings ---
     std::string vad_model_filename = "ggml-silero-vad.bin"; 
     std::string vad_model_url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin";
+    
     bool enable_vad = true;
     float vad_threshold = 0.5f;        
     int vad_ms_min_duration = 500;     
     
-    // --- Performans & Batching (GÜNCELLENDİ) ---
+    // --- Performance & Batching ---
     int n_threads = std::min(4, (int)std::thread::hardware_concurrency());
-    
-    // Aynı anda işlenebilecek maksimum istek sayısı (GPU VRAM'e bağlıdır)
-    // RTX 3060 (12GB) -> Medium model ile ~4-6 arası güvenlidir.
     int parallel_requests = 2; 
 
     std::string device = "auto"; 
@@ -39,6 +37,7 @@ struct Settings {
     bool translate = false;
     bool no_timestamps = false;
     
+    // --- Advanced Generation ---
     int beam_size = 5;
     float temperature = 0.0f;
     int best_of = 5;
@@ -47,6 +46,9 @@ struct Settings {
     
     bool flash_attn = true;
     bool suppress_nst = true; 
+    
+    // YENİ: Speaker Diarization (Konuşmacı Ayrıştırma)
+    bool enable_diarization = false; 
 
     int sample_rate = 16000; 
     std::string log_level = "info";
@@ -93,9 +95,11 @@ inline Settings load_settings() {
     
     s.flash_attn = get_bool("STT_WHISPER_SERVICE_FLASH_ATTN", s.flash_attn);
     s.suppress_nst = get_bool("STT_WHISPER_SERVICE_SUPPRESS_NST", s.suppress_nst);
+    
+    // YENİ: Diarization
+    s.enable_diarization = get_bool("STT_WHISPER_SERVICE_ENABLE_DIARIZATION", s.enable_diarization);
 
     s.n_threads = get_int("STT_WHISPER_SERVICE_THREADS", s.n_threads);
-    // YENİ: Paralel istek sayısı
     s.parallel_requests = get_int("STT_WHISPER_SERVICE_PARALLEL_REQUESTS", s.parallel_requests);
 
     s.language = get_env("STT_WHISPER_SERVICE_LANGUAGE", s.language);
