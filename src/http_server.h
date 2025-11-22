@@ -31,13 +31,19 @@ private:
 
 class HttpServer {
 public:
-    HttpServer(std::shared_ptr<SttEngine> engine, const std::string& host, int port);
+    // Metrics referansını da alıyoruz ki REST isteklerini de sayabilelim
+    HttpServer(std::shared_ptr<SttEngine> engine, AppMetrics& metrics, const std::string& host, int port);
     void run();
     void stop();
 
 private:
+    void setup_routes();
+    // WAV header'ını ayrıştırıp raw PCM verisini döndürür
+    std::vector<int16_t> parse_wav(const std::string& bytes);
+
     httplib::Server svr_;
     std::shared_ptr<SttEngine> engine_;
+    AppMetrics& metrics_;
     std::string host_;
     int port_;
 };

@@ -62,6 +62,9 @@ COPY --from=builder /app/vcpkg_installed/x64-linux/lib/*.so* /usr/local/lib/
 COPY --from=builder /app/dist/lib/*.so* /usr/local/lib/
 RUN ldconfig
 
+# UI Dosyalarını Kopyala (YENİ)
+COPY studio /app/studio
+
 WORKDIR /app
 RUN mkdir -p /models
 

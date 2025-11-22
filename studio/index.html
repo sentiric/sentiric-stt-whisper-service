@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentiric Omni-Studio | STT</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="brand">
+                <div class="logo"></div>
+                <h1>Sentiric STT <span class="badge">v2.0 C++</span></h1>
+            </div>
+            <div class="status" id="statusIndicator">Connecting...</div>
+        </header>
+
+        <main>
+            <div class="card">
+                <div class="visualizer-container">
+                    <canvas id="visualizer"></canvas>
+                </div>
+                <div class="controls">
+                    <button id="recordBtn" class="btn btn-primary">
+                        <span class="icon">🎤</span> Record
+                    </button>
+                    <input type="file" id="fileInput" accept=".wav" hidden>
+                    <button id="uploadBtn" class="btn btn-secondary">
+                        <span class="icon">📁</span> Upload WAV
+                    </button>
+                </div>
+            </div>
+
+            <div class="card output-card">
+                <div class="card-header">
+                    <h3>Transcription</h3>
+                    <span id="metrics" class="meta">0.00s processing</span>
+                </div>
+                <div class="output-area" id="output">
+                    <span class="placeholder">Transcription text will appear here...</span>
+                </div>
+                <div class="card-footer">
+                    <span id="detectedLang" class="tag hidden">LANG: --</span>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

@@ -108,7 +108,8 @@ int main() {
         builder.RegisterService(&grpc_service);
         std::unique_ptr<grpc::Server> grpc_server = builder.BuildAndStart();
 
-        HttpServer http_server(engine, settings.host, settings.http_port);
+        // GÜNCELLEME: metrics objesi artık pass ediliyor
+        HttpServer http_server(engine, metrics, settings.host, settings.http_port);
         MetricsServer metrics_server(settings.host, settings.http_port + 100, *registry);
 
         std::thread http_thread([&](){ http_server.run(); });
