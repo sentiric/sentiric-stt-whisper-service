@@ -113,17 +113,20 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.print_progress = false;
     wparams.print_timestamps = !settings_.no_timestamps;
     wparams.print_special = false;
-    wparams.token_timestamps = true; // KRİTİK: Token (kelime) bazlı timestamp'i aç
+    wparams.token_timestamps = true; // Token (kelime) bazlı timestamp
     
     wparams.translate = settings_.translate;
     wparams.n_threads = settings_.n_threads;
 
-    // Dil Seçimi
+    // --- DÜZELTME: Dil Seçimi ---
+    // Önceden 'settings_.language' kullanılıyordu, parametre eziliyordu.
+    // Şimdi hesaplanan 'target_lang' kullanılıyor.
     std::string target_lang = language;
     if (target_lang.empty()) {
         target_lang = settings_.language;
     }    
-    wparams.language = settings_.language.c_str();    
+    wparams.language = target_lang.c_str();    
+    // -----------------------------
     
     // Advanced Settings
     wparams.temperature = settings_.temperature;
@@ -153,7 +156,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         const int64_t t0 = whisper_full_get_segment_t0(ctx_, i);
         const int64_t t1 = whisper_full_get_segment_t1(ctx_, i);
         
-        // --- YENİ: Token Extraction ---
         std::vector<TokenData> tokens;
         int n_tokens = whisper_full_n_tokens(ctx_, i);
         
@@ -161,7 +163,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             auto data = whisper_full_get_token_data(ctx_, i, j);
             const char* token_text = whisper_token_to_str(ctx_, data.id);
             
-            // Özel tokenları filtrele (örn: [BEG], [NOTIMESTAMP] vb.)
             if (data.id >= whisper_token_eot(ctx_)) continue; 
 
             tokens.push_back({
@@ -171,7 +172,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
                 data.t1
             });
         }
-        // ------------------------------
 
         results.push_back({std::string(text), target_lang, 1.0f, t0, t1, tokens});
     }

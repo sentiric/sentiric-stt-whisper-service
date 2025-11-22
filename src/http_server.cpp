@@ -7,6 +7,47 @@
 
 using json = nlohmann::json;
 
+// --- UTF-8 Sanitizer (Helper) ---
+// Modelden gelen bozuk byte dizilerini temizler, JSON crash'ini önler.
+std::string clean_utf8(const std::string& str) {
+    std::string res;
+    res.reserve(str.size());
+    size_t i = 0;
+    while (i < str.size()) {
+        unsigned char c = str[i];
+        int n;
+        // UTF-8 byte uzunluğu tespiti
+        if      (c < 0x80) n = 1;             // 0xxxxxxx
+        else if ((c & 0xE0) == 0xC0) n = 2;   // 110xxxxx
+        else if ((c & 0xF0) == 0xE0) n = 3;   // 1110xxxx
+        else if ((c & 0xF8) == 0xF0) n = 4;   // 11110xxx
+        else {
+            // Geçersiz başlangıç byte'ı, atla
+            i++; continue; 
+        }
+
+        if (i + n > str.size()) break; // String sonu hatası
+        
+        // Takip eden byte'ları kontrol et (10xxxxxx)
+        bool valid = true;
+        for (int j = 1; j < n; j++) {
+            if ((str[i + j] & 0xC0) != 0x80) {
+                valid = false;
+                break;
+            }
+        }
+
+        if (valid) {
+            res.append(str, i, n);
+            i += n;
+        } else {
+            i++; // Geçersiz dizi, sadece ilk byte'ı atla ve devam et
+        }
+    }
+    return res;
+}
+// --------------------------------
+
 // --- Metrics Server ---
 MetricsServer::MetricsServer(const std::string& host, int port, prometheus::Registry& registry)
     : host_(host), port_(port), registry_(registry) {
@@ -48,7 +89,7 @@ void HttpServer::setup_routes() {
             {"status", ready ? "healthy" : "unhealthy"},
             {"model_ready", ready},
             {"service", "sentiric-stt-whisper-service"},
-            {"version", "2.1.0"}, // Versiyonu artırdık
+            {"version", "2.1.1"}, // Patch version update
             {"api_compatibility", "openai-whisper"}
         };
         res.set_header("Access-Control-Allow-Origin", "*");
@@ -56,7 +97,7 @@ void HttpServer::setup_routes() {
         res.status = ready ? 200 : 503;
     });
 
-    // 3. Transcribe Handler (Ortak Mantık)
+    // 3. Transcribe Handler
     auto transcribe_handler = [this](const httplib::Request &req, httplib::Response &res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         metrics_.requests_total.Increment();
@@ -69,7 +110,7 @@ void HttpServer::setup_routes() {
 
         if (!req.has_file("file")) {
             res.status = 400;
-            res.set_content(json{{"error", "No file uploaded. Field 'file' is required."}}.dump(), "application/json");
+            res.set_content(json{{"error", "No file uploaded."}}.dump(), "application/json");
             return;
         }
 
@@ -91,32 +132,33 @@ void HttpServer::setup_routes() {
             auto end_time = std::chrono::steady_clock::now();
             std::chrono::duration<double> processing_time = end_time - start_time;
 
-            // JSON Response Construction
             std::string full_text;
             std::string detected_lang = "unknown";
             json segments = json::array();
             
             for (const auto& r : results) {
-                full_text += r.text;
+                // DÜZELTME: UTF-8 Temizliği
+                std::string safe_text = clean_utf8(r.text);
+                full_text += safe_text;
+                
                 detected_lang = r.language;
                 
-                // Kelime detaylarını oluştur
                 json words_json = json::array();
                 for (const auto& t : r.tokens) {
                     words_json.push_back({
-                        {"word", t.text},
-                        {"start", (double)t.t0 / 100.0}, // whisper.cpp bazen 10ms birimi kullanır, kontrol edilmeli. Genelde 10ms.
+                        {"word", clean_utf8(t.text)}, // Token text'i de temizle
+                        {"start", (double)t.t0 / 100.0},
                         {"end", (double)t.t1 / 100.0},
                         {"probability", t.p}
                     });
                 }
 
                 segments.push_back({
-                    {"text", r.text},
-                    {"start", (double)r.t0 / 100.0}, // 10ms -> saniye
-                    {"end", (double)r.t1 / 100.0},   // 10ms -> saniye
+                    {"text", safe_text},
+                    {"start", (double)r.t0 / 100.0},
+                    {"end", (double)r.t1 / 100.0},
                     {"probability", r.prob},
-                    {"words", words_json} // YENİ: Word-level timestamps
+                    {"words", words_json}
                 });
             }
 
@@ -132,7 +174,7 @@ void HttpServer::setup_routes() {
                 {"meta", {
                     {"processing_time", processing_time.count()},
                     {"rtf", processing_time.count() / (duration > 0 ? duration : 1.0)},
-                    {"device", "native-cpp-v2.1"}
+                    {"device", "native-cpp-v2.1.1"}
                 }}
             };
 
@@ -148,10 +190,7 @@ void HttpServer::setup_routes() {
         }
     };
 
-    // Kendi standardımız
     svr_.Post("/v1/transcribe", transcribe_handler);
-    
-    // OpenAI Standardı (Open WebUI uyumluluğu için)
     svr_.Post("/v1/audio/transcriptions", transcribe_handler);
 }
 
