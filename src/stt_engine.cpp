@@ -1,6 +1,6 @@
 #include "stt_engine.h"
 #include "spdlog/spdlog.h"
-#include <samplerate.h> // Libsamplerate
+#include <samplerate.h> 
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
@@ -9,10 +9,8 @@ SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
     spdlog::info("Loading Whisper model from: {}", model_path);
 
-    // Whisper context'i başlat
     struct whisper_context_params cparams = whisper_context_default_params();
     
-    // GPU desteği varsa kullan
     #ifdef GGML_USE_CUDA
     spdlog::info("CUDA detected. Enabling GPU offloading for Whisper.");
     cparams.use_gpu = true;
@@ -45,7 +43,7 @@ std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, in
     }
 
     double ratio = (double)target_rate / (double)src_rate;
-    long output_frames = (long)(input.size() * ratio) + 100; // Biraz buffer ekle
+    long output_frames = (long)(input.size() * ratio) + 100; 
     std::vector<float> output(output_frames);
 
     SRC_DATA src_data;
@@ -54,18 +52,16 @@ std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, in
     src_data.data_out = output.data();
     src_data.output_frames = output_frames;
     src_data.src_ratio = ratio;
-    src_data.end_of_input = 0; // Batch mode için basit ayar
+    src_data.end_of_input = 0; 
 
-    // SRC_SINC_FASTEST: Hızlı ve yeterince kaliteli
-    int error = src_simple(&src_data, SRC_SINC_FASTEST, 1); // 1 channel (mono)
+    int error = src_simple(&src_data, SRC_SINC_FASTEST, 1); 
 
     if (error) {
         spdlog::error("Libsamplerate error: {}", src_strerror(error));
-        return input; // Hata durumunda orijinali döndür
+        return input; 
     }
 
     output.resize(src_data.output_frames_gen);
-    spdlog::debug("Resampled audio from {}Hz to {}Hz ({} -> {} frames)", src_rate, target_rate, input.size(), output.size());
     return output;
 }
 
@@ -74,13 +70,11 @@ std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
     int input_sample_rate,
     const std::string& language
 ) {
-    // 1. Normalization
     std::vector<float> pcmf32(pcm16.size());
     for (size_t i = 0; i < pcm16.size(); ++i) {
         pcmf32[i] = static_cast<float>(pcm16[i]) / 32768.0f;
     }
 
-    // 2. Resampling
     if (input_sample_rate != 16000) {
         pcmf32 = resample_audio(pcmf32, input_sample_rate, 16000);
     }
@@ -97,7 +91,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
 
     if (!ctx_) return {};
 
-    // Resampling Logic
     std::vector<float> processed_audio;
     if (input_sample_rate != 16000) {
         processed_audio = resample_audio(pcmf32, input_sample_rate, 16000);
@@ -105,7 +98,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         processed_audio = pcmf32;
     }
 
-    // Whisper Params
     whisper_sampling_strategy strategy = (settings_.beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
     whisper_full_params wparams = whisper_full_default_params(strategy);
     
@@ -113,22 +105,22 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.print_progress = false;
     wparams.print_timestamps = !settings_.no_timestamps;
     wparams.print_special = false;
-    wparams.token_timestamps = true; // Token (kelime) bazlı timestamp
+    wparams.token_timestamps = true; 
     
+    // --- KRİTİK AYAR: SES EFEKTLERİNİ SUSTUR ---
+    // [Music], [Roars], [Silence] gibi çıktıları engeller.
+    wparams.suppress_non_speech_tokens = true;
+    // -------------------------------------------
+
     wparams.translate = settings_.translate;
     wparams.n_threads = settings_.n_threads;
 
-    // --- DÜZELTME: Dil Seçimi ---
-    // Önceden 'settings_.language' kullanılıyordu, parametre eziliyordu.
-    // Şimdi hesaplanan 'target_lang' kullanılıyor.
     std::string target_lang = language;
     if (target_lang.empty()) {
         target_lang = settings_.language;
     }    
     wparams.language = target_lang.c_str();    
-    // -----------------------------
     
-    // Advanced Settings
     wparams.temperature = settings_.temperature;
     
     if (strategy == WHISPER_SAMPLING_BEAM_SEARCH) {
@@ -141,13 +133,11 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.logprob_thold = settings_.logprob_threshold;
     wparams.no_speech_thold = settings_.no_speech_threshold;
 
-    // Inference
     if (whisper_full(ctx_, wparams, processed_audio.data(), processed_audio.size()) != 0) {
         spdlog::error("Whisper failed to process audio");
         return {};
     }
     
-    // Sonuç Toplama
     std::vector<TranscriptionResult> results;
     const int n_segments = whisper_full_n_segments(ctx_);
     

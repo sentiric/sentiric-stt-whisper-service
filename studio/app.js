@@ -194,7 +194,6 @@ async function uploadAudio(blob) {
             const currentText = $('output').innerText;
             const newText = data.text.trim();
             
-            // Boş veya anlamsız çıktıları filtrele
             if(newText.length > 0) {
                 const timestamp = new Date().toLocaleTimeString();
                 const entry = `[${timestamp}] ${newText}\n`;
@@ -202,7 +201,6 @@ async function uploadAudio(blob) {
                 if (currentText.includes("Ready to process")) {
                     $('output').innerText = entry;
                 } else {
-                    // Yeni metni üste ekle
                     $('output').innerText = entry + $('output').innerText;
                 }
             }
@@ -212,7 +210,13 @@ async function uploadAudio(blob) {
             if (data.meta) {
                 $('metaDuration').innerText = data.duration.toFixed(2) + "s";
                 $('metaProcess').innerText = data.meta.processing_time.toFixed(3) + "s";
-                $('metaSpeed').innerText = "⚡ " + data.meta.rtf.toFixed(1) + "x";
+                
+                // DÜZELTME: RTF (Real Time Factor) yerine Hız (Speed) gösterimi
+                // RTF düşükse (0.03) hız yüksektir (33x).
+                const rtf = data.meta.rtf;
+                const speed = rtf > 0 ? (1.0 / rtf) : 0;
+                
+                $('metaSpeed').innerText = "⚡ " + speed.toFixed(1) + "x Faster";
             }
         } else {
             console.error(data.error);
