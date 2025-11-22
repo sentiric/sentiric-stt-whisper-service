@@ -4,6 +4,6 @@ services:
       context: .
       dockerfile: Dockerfile
     image: sentiric/stt-whisper-service:local
-    # Modelleri yerel cache'den hızlıca almak için host path mount edilebilir
-    # volumes:
-    #   - ./models:/models
+    # --- EKLENDİ: Yerel modelleri içeri aktar ---
+    volumes:
+      - ./models:/models

@@ -19,3 +19,7 @@ models/*.bin
 
 # NOT: .github, Dockerfile* ve docker-compose* satırları SİLİNDİ.
 # Bunlar repoya GİTMELİDİR.
+
+# Test verileri
+*.wav
+test_data/
