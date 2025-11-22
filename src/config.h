@@ -7,7 +7,7 @@
 #include "spdlog/spdlog.h"
 
 struct Settings {
-    // ... (Mevcut ayarlar) ...
+    // ... (Mevcut ayarlar korunuyor) ...
     std::string host = "0.0.0.0";
     int http_port = 15030;
     int grpc_port = 15031;
@@ -18,11 +18,13 @@ struct Settings {
     std::string model_url_template = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin";
     int model_load_timeout = 600;
 
-    // VAD Settings (YENİ)
-    std::string vad_model_filename = "ggml-silero-vad.bin"; // Varsayılan
+    // --- VAD Settings (GÜNCELLENDİ) ---
+    std::string vad_model_filename = "ggml-silero-vad.bin"; 
     bool enable_vad = true;
-
-    // ... (Diğerleri aynı) ...
+    float vad_threshold = 0.5f;        // 0.5 üzeri konuşma sayılır
+    int vad_ms_min_duration = 500;     // En az 500ms konuşma olmalı
+    
+    // ... (Diğer ayarlar aynen kalıyor) ...
     int n_threads = std::min(4, (int)std::thread::hardware_concurrency());
     std::string device = "auto"; 
     std::string compute_type = "int8";
@@ -37,11 +39,9 @@ struct Settings {
     float logprob_threshold = -1.0f;
     float no_speech_threshold = 0.6f;
     
-    // YENİ: Flash Attention (v1.8.2)
     bool flash_attn = true;
-    bool suppress_nst = true; // Non-speech tokens
+    bool suppress_nst = true; 
 
-    // ... (Log, Security aynı) ...
     int sample_rate = 16000; 
     std::string log_level = "info";
     std::string grpc_ca_path = "";
@@ -50,13 +50,11 @@ struct Settings {
 };
 
 inline Settings load_settings() {
-    // ... (Mevcut loader kodları aynı) ...
     Settings s;
     auto get_env = [](const char* name, const std::string& def) -> std::string {
         const char* val = std::getenv(name);
         return val ? std::string(val) : def;
     };
-    // ... diğer helperlar ...
     auto get_int = [&](const char* name, int def) -> int {
         const char* val = std::getenv(name);
         return val ? std::stoi(val) : def;
@@ -73,7 +71,7 @@ inline Settings load_settings() {
         return v == "true" || v == "1";
     };
 
-    // ... (Mevcut atamalar) ...
+    // ... (Mevcut yüklemeler) ...
     s.host = get_env("STT_WHISPER_SERVICE_IPV4_ADDRESS", "0.0.0.0");
     s.http_port = get_int("STT_WHISPER_SERVICE_HTTP_PORT", s.http_port);
     s.grpc_port = get_int("STT_WHISPER_SERVICE_GRPC_PORT", s.grpc_port);
@@ -82,9 +80,11 @@ inline Settings load_settings() {
     std::string size = get_env("STT_WHISPER_SERVICE_MODEL_SIZE", "medium");
     s.model_filename = get_env("STT_WHISPER_SERVICE_MODEL_FILENAME", "ggml-" + size + ".bin");
     
-    // YENİ: VAD
+    // --- VAD ---
     s.vad_model_filename = get_env("STT_WHISPER_SERVICE_VAD_MODEL", "ggml-silero-vad.bin");
     s.enable_vad = get_bool("STT_WHISPER_SERVICE_ENABLE_VAD", s.enable_vad);
+    s.vad_threshold = get_float("STT_WHISPER_SERVICE_VAD_THRESHOLD", s.vad_threshold);
+    
     s.flash_attn = get_bool("STT_WHISPER_SERVICE_FLASH_ATTN", s.flash_attn);
     s.suppress_nst = get_bool("STT_WHISPER_SERVICE_SUPPRESS_NST", s.suppress_nst);
 

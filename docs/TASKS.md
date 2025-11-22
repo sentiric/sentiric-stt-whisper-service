@@ -3,6 +3,7 @@
 ## ✅ TAMAMLANAN (FAZ 1 & 2 - MIGRATION & STABILITY)
 - [x] **Altyapı:** CMake, vcpkg ve Docker altyapısının kurulması.
 - [x] **Motor:** `whisper.cpp` entegrasyonu ve `SttEngine` sınıfı.
+- [x] **Native VAD:** `Silero-VAD` entegrasyonu ile sessiz bölümlerin GPU'ya gönderilmeden filtrelenmesi.
 - [x] **Sunucu:** gRPC (Streaming/Unary) ve HTTP sunucularının yazılması.
 - [x] **Ses İşleme:** `libsamplerate` ile 8kHz -> 16kHz otomatik dönüşüm.
 - [x] **Auto-Provisioning:** Servis başladığında modelin otomatik indirilmesi (`ModelManager`).
