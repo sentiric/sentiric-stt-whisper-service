@@ -1,18 +1,21 @@
 .git
-.github
 .vscode
 .idea
 build/
 temp/
 *.log
-*.md
-!README.md
-!docs/
-docker-compose.*
-Dockerfile*
-LICENSE
+
+# Dokümantasyon kalsın (opsiyonel, genelde istenir)
+# *.md
+# !README.md
+# !docs/
+
+# Build ve Paket Artıkları (KESİNLİKLE GİTMEMELİ)
 vcpkg_installed/
 
-# Modelleri repo'ya yükleme
+# Model Dosyaları (GB boyutunda oldukları için gitmemeli)
 models/*.bin
 !models/.keep
+
+# NOT: .github, Dockerfile* ve docker-compose* satırları SİLİNDİ.
+# Bunlar repoya GİTMELİDİR.
