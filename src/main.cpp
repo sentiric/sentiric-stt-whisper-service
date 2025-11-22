@@ -57,12 +57,20 @@ int main() {
     spdlog::info("🚀 Sentiric STT Whisper Service (C++) Starting...");
     spdlog::info("Config: Model={}, Threads={}", settings.model_filename, settings.n_threads);
 
+    // --- AUTO-PROVISIONING ---
     try {
+        spdlog::info("📦 Checking models...");
+        // 1. Ana Model
         ModelManager::ensure_model(settings);
+        // 2. VAD Modeli (YENİ)
+        if (settings.enable_vad) {
+            ModelManager::ensure_vad_model(settings);
+        }
     } catch (const std::exception& e) {
         spdlog::critical("Model provisioning failed: {}", e.what());
-        return 1;
+        return 1; // Modeller yoksa başlama
     }
+    // -------------------------
 
     auto registry = std::make_shared<prometheus::Registry>();
     auto& req_total = prometheus::BuildCounter().Name("stt_requests_total").Register(*registry).Add({});
@@ -107,7 +115,6 @@ int main() {
 
         HttpServer http_server(engine, metrics, settings.host, settings.http_port);
         
-        // DÜZELTME: Hardcoded port (+100) yerine settings.metrics_port kullanıldı.
         MetricsServer metrics_server(settings.host, settings.metrics_port, *registry);
 
         std::thread http_thread([&](){ http_server.run(); });

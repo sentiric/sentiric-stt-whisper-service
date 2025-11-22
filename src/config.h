@@ -7,24 +7,26 @@
 #include "spdlog/spdlog.h"
 
 struct Settings {
-    // ... (Mevcut ayarlar korunuyor) ...
     std::string host = "0.0.0.0";
     int http_port = 15030;
     int grpc_port = 15031;
     int metrics_port = 15032;
 
+    // --- Main Model ---
     std::string model_dir = "/models";
     std::string model_filename = "ggml-medium.bin";
     std::string model_url_template = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin";
     int model_load_timeout = 600;
 
-    // --- VAD Settings (GÜNCELLENDİ) ---
+    // --- VAD Settings (GÜNCELLENDİ: URL Eklendi) ---
     std::string vad_model_filename = "ggml-silero-vad.bin"; 
-    bool enable_vad = true;
-    float vad_threshold = 0.5f;        // 0.5 üzeri konuşma sayılır
-    int vad_ms_min_duration = 500;     // En az 500ms konuşma olmalı
+    // Resmi Whisper.cpp VAD Model URL'i (HuggingFace)
+    std::string vad_model_url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-silero-vad.bin";
     
-    // ... (Diğer ayarlar aynen kalıyor) ...
+    bool enable_vad = true;
+    float vad_threshold = 0.5f;        
+    int vad_ms_min_duration = 500;     
+    
     int n_threads = std::min(4, (int)std::thread::hardware_concurrency());
     std::string device = "auto"; 
     std::string compute_type = "int8";
@@ -71,17 +73,18 @@ inline Settings load_settings() {
         return v == "true" || v == "1";
     };
 
-    // ... (Mevcut yüklemeler) ...
     s.host = get_env("STT_WHISPER_SERVICE_IPV4_ADDRESS", "0.0.0.0");
     s.http_port = get_int("STT_WHISPER_SERVICE_HTTP_PORT", s.http_port);
     s.grpc_port = get_int("STT_WHISPER_SERVICE_GRPC_PORT", s.grpc_port);
     s.metrics_port = get_int("STT_WHISPER_SERVICE_METRICS_PORT", s.metrics_port);
+    
     s.model_dir = get_env("STT_WHISPER_SERVICE_MODEL_DIR", s.model_dir);
     std::string size = get_env("STT_WHISPER_SERVICE_MODEL_SIZE", "medium");
     s.model_filename = get_env("STT_WHISPER_SERVICE_MODEL_FILENAME", "ggml-" + size + ".bin");
     
-    // --- VAD ---
+    // --- VAD Config ---
     s.vad_model_filename = get_env("STT_WHISPER_SERVICE_VAD_MODEL", "ggml-silero-vad.bin");
+    s.vad_model_url = get_env("STT_WHISPER_SERVICE_VAD_URL", s.vad_model_url);
     s.enable_vad = get_bool("STT_WHISPER_SERVICE_ENABLE_VAD", s.enable_vad);
     s.vad_threshold = get_float("STT_WHISPER_SERVICE_VAD_THRESHOLD", s.vad_threshold);
     
