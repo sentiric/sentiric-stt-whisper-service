@@ -1,0 +1,9 @@
+services:
+  stt-whisper-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sentiric/stt-whisper-service:local
+    # Modelleri yerel cache'den hızlıca almak için host path mount edilebilir
+    # volumes:
+    #   - ./models:/models

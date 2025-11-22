@@ -1,0 +1,33 @@
+version: "3.8"
+
+networks:
+  sentiric-net:
+    name: "sentiric-net"
+    driver: bridge
+
+volumes:
+  whisper_models:
+
+services:
+  stt-whisper-service:
+    restart: unless-stopped
+    environment:
+      - STT_WHISPER_SERVICE_LISTEN_ADDRESS=0.0.0.0
+      - STT_WHISPER_SERVICE_HTTP_PORT=15030
+      - STT_WHISPER_SERVICE_GRPC_PORT=15031
+      - STT_WHISPER_SERVICE_MODEL_DIR=/models
+      - STT_WHISPER_SERVICE_MODEL_FILENAME=ggml-base.bin
+      - STT_WHISPER_SERVICE_THREADS=4
+      - STT_WHISPER_SERVICE_LOG_LEVEL=info
+    volumes:
+      - whisper_models:/models
+    ports:
+      - "15030:15030"
+      - "15031:15031"
+    networks:
+      - sentiric-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:15030/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

@@ -1,0 +1,6 @@
+services:
+  stt-whisper-service:
+    image: ghcr.io/sentiric/sentiric-stt-whisper-service:latest
+    # CPU özel ayarları (gerekirse)
+    environment:
+      - STT_WHISPER_SERVICE_THREADS=8

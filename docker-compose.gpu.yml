@@ -1,0 +1,10 @@
+services:
+  stt-whisper-service:
+    image: ghcr.io/sentiric/sentiric-stt-whisper-service:latest-gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
