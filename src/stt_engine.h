@@ -22,7 +22,7 @@ struct TranscriptionResult {
     float prob;
     int64_t t0; 
     int64_t t1; 
-    bool speaker_turn_next; // YENİ: Bu segmentten sonra konuşmacı değişti mi?
+    bool speaker_turn_next;
     std::vector<TokenData> tokens; 
 };
 
@@ -33,16 +33,19 @@ public:
 
     bool is_ready() const;
 
+    // GÜNCELLENDİ: prompt parametresi eklendi
     std::vector<TranscriptionResult> transcribe(
         const std::vector<float>& pcmf32, 
         int input_sample_rate = 16000,
-        const std::string& language = "" 
+        const std::string& language = "",
+        const std::string& prompt = "" 
     );
 
     std::vector<TranscriptionResult> transcribe_pcm16(
         const std::vector<int16_t>& pcm16, 
         int input_sample_rate = 16000,
-        const std::string& language = ""
+        const std::string& language = "",
+        const std::string& prompt = ""
     );
 
 private:

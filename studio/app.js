@@ -189,6 +189,10 @@ const NetworkEngine = {
         const lang = $('langSelect').value;
         if (lang !== 'auto') formData.append('language', lang);
 
+        // YENİ: Prompt Ekleme
+        const prompt = $('promptInput').value.trim();
+        if (prompt) formData.append('prompt', prompt);
+
         // UI Placeholder ekle
         const segmentId = ui.addSegment('Transkribe ediliyor...', durationMs);
         

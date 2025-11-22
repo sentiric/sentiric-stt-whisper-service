@@ -96,12 +96,22 @@ void HttpServer::setup_routes() {
             lang = req.get_file_value("language").content;
         }
 
-        spdlog::info("🎤 Processing Audio: {} ({} bytes) | Lang Request: {}", file.filename, file.content.size(), lang);
+        // YENİ: Prompt Okuma
+        std::string prompt = "";
+        if (req.has_file("prompt")) {
+            prompt = req.get_file_value("prompt").content;
+        }
+
+        spdlog::info("🎤 Processing Audio: {} ({} bytes) | Lang: {} | Prompt: {}", 
+            file.filename, file.content.size(), lang, prompt);
 
         try {
             auto start_time = std::chrono::steady_clock::now();
             auto pcm16 = parse_wav(file.content);
-            auto results = engine_->transcribe_pcm16(pcm16, 16000, lang);
+            
+            // GÜNCELLENDİ: Prompt parametresi ile çağrı
+            auto results = engine_->transcribe_pcm16(pcm16, 16000, lang, prompt);
+            
             auto end_time = std::chrono::steady_clock::now();
             std::chrono::duration<double> processing_time = end_time - start_time;
 

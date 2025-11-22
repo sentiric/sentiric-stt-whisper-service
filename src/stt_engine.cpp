@@ -6,59 +6,38 @@
 #include <algorithm>
 #include <numeric>
 
+
 SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
-    // 1. Ana Model Yükleme
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
     spdlog::info("Loading Whisper model from: {}", model_path);
 
     struct whisper_context_params cparams = whisper_context_default_params();
-    
     #ifdef GGML_USE_CUDA
     spdlog::info("CUDA detected. Enabling GPU offloading for Main Engine.");
     cparams.use_gpu = true;
-    if (settings_.flash_attn) {
-        spdlog::info("⚡ Flash Attention enabled.");
-        cparams.flash_attn = true; 
-    }
+    if (settings_.flash_attn) cparams.flash_attn = true; 
     #endif
 
     ctx_ = whisper_init_from_file_with_params(model_path.c_str(), cparams);
-    if (!ctx_) {
-        spdlog::error("Failed to initialize whisper context from {}", model_path);
-        throw std::runtime_error("Whisper model initialization failed");
-    }
+    if (!ctx_) throw std::runtime_error("Whisper model initialization failed");
 
-    // 2. Dynamic Batching Pool
     int pool_size = settings_.parallel_requests;
     if (pool_size < 1) pool_size = 1;
-    
     spdlog::info("⚡ Initializing Dynamic Batching Pool with {} states...", pool_size);
     
     for(int i=0; i<pool_size; ++i) {
         struct whisper_state* state = whisper_init_state(ctx_);
-        if(!state) {
-            throw std::runtime_error("Failed to allocate whisper state (VRAM might be full)");
-        }
+        if(!state) throw std::runtime_error("Failed to allocate whisper state");
         state_pool_.push(state);
         all_states_.push_back(state);
     }
-    spdlog::info("✅ State pool initialized. Max concurrency: {}", pool_size);
 
-    // 3. VAD Modeli (CPU)
     if (settings_.enable_vad) {
         std::string vad_path = settings_.model_dir + "/" + settings_.vad_model_filename;
-        spdlog::info("Loading VAD model from: {}", vad_path);
-        
         struct whisper_vad_context_params vparams = whisper_vad_default_context_params();
         vparams.use_gpu = false; 
-        
         vad_ctx_ = whisper_vad_init_from_file_with_params(vad_path.c_str(), vparams);
-        
-        if (!vad_ctx_) {
-            spdlog::warn("⚠️ VAD model could not be loaded. Continuing without VAD.");
-        } else {
-            spdlog::info("✅ Native Silero VAD loaded successfully (CPU Mode).");
-        }
+        if (vad_ctx_) spdlog::info("✅ Native Silero VAD loaded successfully (CPU Mode).");
     }
 }
 
@@ -111,19 +90,21 @@ bool SttEngine::is_speech_detected(const std::vector<float>& pcmf32) {
 std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
     const std::vector<int16_t>& pcm16, 
     int input_sample_rate,
-    const std::string& language
+    const std::string& language,
+    const std::string& prompt
 ) {
     std::vector<float> pcmf32(pcm16.size());
     for (size_t i = 0; i < pcm16.size(); ++i) {
         pcmf32[i] = static_cast<float>(pcm16[i]) / 32768.0f;
     }
-    return transcribe(pcmf32, input_sample_rate, language);
+    return transcribe(pcmf32, input_sample_rate, language, prompt);
 }
 
 std::vector<TranscriptionResult> SttEngine::transcribe(
     const std::vector<float>& pcmf32, 
     int input_sample_rate,
-    const std::string& language
+    const std::string& language,
+    const std::string& prompt
 ) {
     if (!ctx_) return {};
 
@@ -161,13 +142,18 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.no_speech_thold = settings_.no_speech_threshold; 
     wparams.translate = settings_.translate;
     wparams.n_threads = settings_.n_threads;
-    
-    // YENİ: Speaker Diarization Enable
     wparams.tdrz_enable = settings_.enable_diarization; 
 
     std::string target_lang = language;
     if (target_lang.empty()) target_lang = settings_.language;
     wparams.language = target_lang.c_str();    
+    
+    // --- YENİ: Prompt Entegrasyonu ---
+    if (!prompt.empty()) {
+        wparams.initial_prompt = prompt.c_str();
+    }
+    // --------------------------------
+
     wparams.temperature = settings_.temperature;
     
     if (strategy == WHISPER_SAMPLING_BEAM_SEARCH) {
@@ -190,8 +176,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             const char* text = whisper_full_get_segment_text_from_state(state, i);
             const int64_t t0 = whisper_full_get_segment_t0_from_state(state, i);
             const int64_t t1 = whisper_full_get_segment_t1_from_state(state, i);
-            
-            // YENİ: Speaker Turn tespiti
             bool speaker_turn = whisper_full_get_segment_speaker_turn_next_from_state(state, i);
 
             std::vector<TokenData> tokens;

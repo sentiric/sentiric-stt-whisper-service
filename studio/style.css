@@ -148,3 +148,23 @@ input:checked + .slider:before { transform: translateX(14px); }
     width: 100%; padding: 8px; background: var(--bg-input); border: 1px solid var(--border);
     color: var(--text-main); border-radius: 6px; cursor: pointer; font-size: 12px;
 }
+
+.text-area {
+    width: 100%;
+    padding: 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    border-radius: 6px;
+    resize: vertical;
+    min-height: 60px;
+    font-family: var(--font-sans);
+    font-size: 12px;
+}
+
+.hint-text {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    font-style: italic;
+}
