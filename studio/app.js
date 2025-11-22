@@ -4,8 +4,16 @@ let isRecording = false;
 let audioContext;
 let mediaStream;
 let visualizerNode;
+let processor;
 let startTime;
 let timerInterval;
+
+// Hands-Free State
+let isHandsFree = false;
+let silenceStart = null;
+let isSpeaking = false;
+const SILENCE_THRESHOLD = 1000; // 1 saniye sessizlikte durdur
+const VOLUME_THRESHOLD = 0.02;  // Ses seviyesi eşiği
 
 // WAV Header (Aynı)
 function createWavHeader(dataLength) {
@@ -31,7 +39,11 @@ function floatTo16BitPCM(input) {
 
 async function startRecording() {
     try {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        }
+        if (audioContext.state === 'suspended') await audioContext.resume();
+
         mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const source = audioContext.createMediaStreamSource(mediaStream);
         
@@ -39,12 +51,41 @@ async function startRecording() {
         source.connect(visualizerNode);
         visualize();
 
-        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
         let recordedChunks = [];
 
         processor.onaudioprocess = (e) => {
             if (!isRecording) return;
-            recordedChunks.push(floatTo16BitPCM(e.inputBuffer.getChannelData(0)));
+            
+            const inputData = e.inputBuffer.getChannelData(0);
+            
+            // --- VAD LOGIC (Hands-Free) ---
+            if (isHandsFree) {
+                // Basit RMS (Root Mean Square) hesaplama
+                let sum = 0;
+                for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
+                const rms = Math.sqrt(sum / inputData.length);
+
+                if (rms > VOLUME_THRESHOLD) {
+                    silenceStart = null; // Konuşuyor
+                    if (!isSpeaking) {
+                        isSpeaking = true;
+                        console.log("🗣️ Speech detected");
+                        $('visualizer').parentElement.classList.add('listening');
+                    }
+                } else if (isSpeaking) {
+                    // Konuşma bitti mi diye kontrol et
+                    if (!silenceStart) silenceStart = Date.now();
+                    else if (Date.now() - silenceStart > SILENCE_THRESHOLD) {
+                        console.log("🤫 Silence detected. Auto-submitting...");
+                        stopRecording(); // Otomatik durdur ve gönder
+                        return;
+                    }
+                }
+            }
+            // ------------------------------
+
+            recordedChunks.push(floatTo16BitPCM(inputData));
         };
 
         source.connect(processor);
@@ -53,6 +94,9 @@ async function startRecording() {
         window.localStream = { processor, recordedChunks };
         
         isRecording = true;
+        silenceStart = null;
+        isSpeaking = false;
+        
         updateUI(true);
         startTimer();
 
@@ -62,14 +106,20 @@ async function startRecording() {
 }
 
 async function stopRecording() {
+    if (!isRecording) return;
     isRecording = false;
     updateUI(false);
     stopTimer();
-    
-    if(mediaStream) mediaStream.getTracks().forEach(t => t.stop());
-    if(audioContext) audioContext.close();
+    $('visualizer').parentElement.classList.remove('listening');
+
+    // Kaynakları temizle
+    if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+    if (processor) { processor.disconnect(); processor = null; }
+    // AudioContext'i kapatma, tekrar kullanacağız.
 
     const chunks = window.localStream.recordedChunks;
+    if (chunks.length === 0) return;
+
     const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
     const result = new Int16Array(totalLength);
     let offset = 0;
@@ -80,21 +130,26 @@ async function stopRecording() {
 
     const header = createWavHeader(result.length * 2);
     const wavBlob = new Blob([header, result], { type: 'audio/wav' });
+    
     await uploadAudio(wavBlob);
+
+    // Hands-Free ise döngüyü tekrar başlat
+    if (isHandsFree) {
+        console.log("🔄 Hands-Free loop: Restarting listener...");
+        setTimeout(startRecording, 500); // Biraz bekle ve tekrar dinle
+    }
 }
 
 async function uploadAudio(blob) {
     const formData = new FormData();
     formData.append('file', blob, 'audio.wav');
     
-    // Dil Seçimi
     const lang = $('langSelect').value;
     if(lang) formData.append('language', lang);
 
     setLoading(true);
     
     try {
-        // OpenAI Uyumlu Endpoint
         const res = await fetch('/v1/audio/transcriptions', {
             method: 'POST',
             body: formData
@@ -103,10 +158,17 @@ async function uploadAudio(blob) {
         const data = await res.json();
         
         if(res.ok) {
-            $('output').innerText = data.text;
+            // Var olan metne ekle (Log tutar gibi)
+            const currentText = $('output').innerText;
+            // Placeholder varsa temizle
+            if (currentText.includes("Ready to process") || currentText.includes("Processing")) {
+                $('output').innerText = `[${new Date().toLocaleTimeString()}] ${data.text}\n`;
+            } else {
+                 $('output').innerText = `[${new Date().toLocaleTimeString()}] ${data.text}\n` + $('output').innerText;
+            }
+            
             $('jsonOutput').innerText = JSON.stringify(data, null, 2);
             
-            // Metrikleri Güncelle (Varsa)
             if (data.meta) {
                 $('metaDuration').innerText = data.duration.toFixed(2) + "s";
                 $('metaProcess').innerText = data.meta.processing_time.toFixed(3) + "s";
@@ -118,10 +180,10 @@ async function uploadAudio(blob) {
                 $('metaSpeed').innerText = "--";
             }
         } else {
-            $('output').innerHTML = `<span style="color:var(--danger)">Error: ${data.error}</span>`;
+            console.error(data.error);
         }
     } catch (e) {
-        $('output').innerHTML = `<span style="color:var(--danger)">Network Error: ${e.message}</span>`;
+        console.error(e.message);
     } finally {
         setLoading(false);
     }
@@ -134,7 +196,7 @@ function updateUI(recording) {
         btn.innerHTML = '<i class="fas fa-stop"></i> Stop';
     } else {
         btn.classList.remove('recording');
-        btn.innerHTML = '<i class="fas fa-microphone"></i> Start Recording';
+        btn.innerHTML = isHandsFree ? '<i class="fas fa-assistive-listening-systems"></i> Auto-Listening' : '<i class="fas fa-microphone"></i> Start Recording';
     }
 }
 
@@ -172,14 +234,17 @@ function visualize() {
         requestAnimationFrame(draw);
         visualizerNode.getByteFrequencyData(dataArray);
         
-        ctx.fillStyle = '#1e293b'; // bg-panel
+        ctx.fillStyle = '#1e293b'; 
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
         const barWidth = (canvas.width / bufferLength) * 2.5;
         let x = 0;
         for(let i = 0; i < bufferLength; i++) {
             const barHeight = dataArray[i] / 2;
-            ctx.fillStyle = `rgb(99, 102, 241)`; // primary
+            // Hands-Free aktifse ve konuşuyorsa Yeşil, değilse Mavi
+            if (isHandsFree && isSpeaking) ctx.fillStyle = `rgb(16, 185, 129)`; // Green
+            else ctx.fillStyle = `rgb(99, 102, 241)`; // Indigo
+
             ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
             x += barWidth + 1;
         }
@@ -187,10 +252,32 @@ function visualize() {
     draw();
 }
 
-$('recordBtn').onclick = () => isRecording ? stopRecording() : startRecording();
+// Listeners
+$('recordBtn').onclick = () => {
+    // Hands-Free kapalıyken manuel durdurma
+    if (isRecording) {
+        // Eğer hands-free açıksa durdurma işlemi loop'u da kırmalı
+        isHandsFree = false; 
+        $('handsFreeToggle').checked = false;
+        stopRecording();
+    } else {
+        startRecording();
+    }
+};
+
+$('handsFreeToggle').onchange = (e) => {
+    isHandsFree = e.target.checked;
+    if (isHandsFree && !isRecording) {
+        startRecording();
+    } else if (!isHandsFree && isRecording) {
+        stopRecording();
+    }
+};
+
 $('uploadBtn').onclick = () => $('fileInput').click();
 $('fileInput').onchange = (e) => { if(e.target.files[0]) uploadAudio(e.target.files[0]); };
 
+// ... (Health check same) ...
 async function checkHealth() {
     try {
         const res = await fetch('/health');
