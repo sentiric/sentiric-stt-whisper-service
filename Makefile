@@ -18,12 +18,13 @@ up-cpu:
 up-gpu:
 	docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.override.yml up --build -d
 
-# Temizlik: Tüm dosya kombinasyonlarını dikkate alarak indir
+# Temizlik
 down:
 	docker compose -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.gpu.yml -f docker-compose.override.yml down --remove-orphans
 
+# DÜZELTME: Logs komutuna da tüm konfigürasyon dosyalarını ekledik.
 logs:
-	docker compose logs -f stt-whisper-service
+	docker compose -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.gpu.yml -f docker-compose.override.yml logs -f stt-whisper-service
 
 test:
 	./e2e-test.sh

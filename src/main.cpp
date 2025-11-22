@@ -2,7 +2,7 @@
 #include "stt_engine.h"
 #include "grpc_server.h"
 #include "http_server.h"
-#include "model_manager.h" // EKLENDİ
+#include "model_manager.h" 
 #include <thread>
 #include <memory>
 #include <csignal>
@@ -17,7 +17,6 @@ namespace {
     std::promise<void> shutdown_promise;
 }
 
-// ... (signal_handler, whisper_log_cb, read_file fonksiyonları aynı kalacak) ...
 void signal_handler(int signal) {
     spdlog::warn("Signal {} received. Initiating graceful shutdown...", signal);
     try { shutdown_promise.set_value(); } catch (...) {}
@@ -58,14 +57,12 @@ int main() {
     spdlog::info("🚀 Sentiric STT Whisper Service (C++) Starting...");
     spdlog::info("Config: Model={}, Threads={}", settings.model_filename, settings.n_threads);
 
-    // --- YENİ: Model Provisioning ---
     try {
         ModelManager::ensure_model(settings);
     } catch (const std::exception& e) {
         spdlog::critical("Model provisioning failed: {}", e.what());
         return 1;
     }
-    // -------------------------------
 
     auto registry = std::make_shared<prometheus::Registry>();
     auto& req_total = prometheus::BuildCounter().Name("stt_requests_total").Register(*registry).Add({});
@@ -108,9 +105,10 @@ int main() {
         builder.RegisterService(&grpc_service);
         std::unique_ptr<grpc::Server> grpc_server = builder.BuildAndStart();
 
-        // GÜNCELLEME: metrics objesi artık pass ediliyor
         HttpServer http_server(engine, metrics, settings.host, settings.http_port);
-        MetricsServer metrics_server(settings.host, settings.http_port + 100, *registry);
+        
+        // DÜZELTME: Hardcoded port (+100) yerine settings.metrics_port kullanıldı.
+        MetricsServer metrics_server(settings.host, settings.metrics_port, *registry);
 
         std::thread http_thread([&](){ http_server.run(); });
         std::thread metrics_thread([&](){ metrics_server.run(); });
