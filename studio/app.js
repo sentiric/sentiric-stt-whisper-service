@@ -15,16 +15,26 @@ let isSpeaking = false;
 const SILENCE_THRESHOLD = 1000; // 1 saniye sessizlikte durdur
 const VOLUME_THRESHOLD = 0.02;  // Ses seviyesi eşiği
 
-// WAV Header (Aynı)
-function createWavHeader(dataLength) {
+// WAV Header (DÜZELTİLDİ: sampleRate parametrik yapıldı)
+function createWavHeader(dataLength, sampleRate) {
     const buffer = new ArrayBuffer(44);
     const view = new DataView(buffer);
-    view.setUint32(0, 0x52494646, false); view.setUint32(4, 36 + dataLength, true); 
-    view.setUint32(8, 0x57415645, false); view.setUint32(12, 0x666d7420, false); 
-    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); 
-    view.setUint32(24, 16000, true); view.setUint32(28, 16000 * 2, true); 
-    view.setUint16(32, 2, true); view.setUint16(34, 16, true); 
-    view.setUint32(36, 0x64617461, false); view.setUint32(40, dataLength, true);
+    // RIFF chunk descriptor
+    view.setUint32(0, 0x52494646, false); // 'RIFF'
+    view.setUint32(4, 36 + dataLength, true); 
+    view.setUint32(8, 0x57415645, false); // 'WAVE'
+    // fmt sub-chunk
+    view.setUint32(12, 0x666d7420, false); // 'fmt '
+    view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
+    view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
+    view.setUint16(22, 1, true); // NumChannels (1 for Mono)
+    view.setUint32(24, sampleRate, true); // SampleRate (Örn: 48000 veya 44100)
+    view.setUint32(28, sampleRate * 2, true); // ByteRate (SampleRate * NumChannels * BitsPerSample/8)
+    view.setUint16(32, 2, true); // BlockAlign (NumChannels * BitsPerSample/8)
+    view.setUint16(34, 16, true); // BitsPerSample (16 bits)
+    // data sub-chunk
+    view.setUint32(36, 0x64617461, false); // 'data'
+    view.setUint32(40, dataLength, true);
     return buffer;
 }
 
@@ -39,10 +49,14 @@ function floatTo16BitPCM(input) {
 
 async function startRecording() {
     try {
+        // DÜZELTME: sampleRate: 16000 zorlaması kaldırıldı.
+        // Tarayıcının/Donanımın doğal hızı neyse o kullanılacak (44.1k veya 48k).
         if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
         if (audioContext.state === 'suspended') await audioContext.resume();
+
+        console.log(`🎤 Microphone initialized at ${audioContext.sampleRate}Hz`);
 
         mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const source = audioContext.createMediaStreamSource(mediaStream);
@@ -61,24 +75,22 @@ async function startRecording() {
             
             // --- VAD LOGIC (Hands-Free) ---
             if (isHandsFree) {
-                // Basit RMS (Root Mean Square) hesaplama
                 let sum = 0;
                 for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
                 const rms = Math.sqrt(sum / inputData.length);
 
                 if (rms > VOLUME_THRESHOLD) {
-                    silenceStart = null; // Konuşuyor
+                    silenceStart = null; 
                     if (!isSpeaking) {
                         isSpeaking = true;
                         console.log("🗣️ Speech detected");
                         $('visualizer').parentElement.classList.add('listening');
                     }
                 } else if (isSpeaking) {
-                    // Konuşma bitti mi diye kontrol et
                     if (!silenceStart) silenceStart = Date.now();
                     else if (Date.now() - silenceStart > SILENCE_THRESHOLD) {
                         console.log("🤫 Silence detected. Auto-submitting...");
-                        stopRecording(); // Otomatik durdur ve gönder
+                        stopRecording();
                         return;
                     }
                 }
@@ -102,6 +114,7 @@ async function startRecording() {
 
     } catch (e) {
         alert("Mic Error: " + e.message);
+        console.error(e);
     }
 }
 
@@ -112,10 +125,8 @@ async function stopRecording() {
     stopTimer();
     $('visualizer').parentElement.classList.remove('listening');
 
-    // Kaynakları temizle
     if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
     if (processor) { processor.disconnect(); processor = null; }
-    // AudioContext'i kapatma, tekrar kullanacağız.
 
     const chunks = window.localStream.recordedChunks;
     if (chunks.length === 0) return;
@@ -128,15 +139,17 @@ async function stopRecording() {
         offset += chunk.length;
     }
 
-    const header = createWavHeader(result.length * 2);
+    // DÜZELTME: Header oluşturulurken AudioContext'in gerçek sampleRate'i gönderiliyor.
+    // Backend bu değeri okuyup ona göre resampling yapacak.
+    const header = createWavHeader(result.length * 2, audioContext.sampleRate);
     const wavBlob = new Blob([header, result], { type: 'audio/wav' });
     
+    console.log(`📤 Uploading audio: ${result.length} samples @ ${audioContext.sampleRate}Hz`);
     await uploadAudio(wavBlob);
 
-    // Hands-Free ise döngüyü tekrar başlat
     if (isHandsFree) {
         console.log("🔄 Hands-Free loop: Restarting listener...");
-        setTimeout(startRecording, 500); // Biraz bekle ve tekrar dinle
+        setTimeout(startRecording, 500);
     }
 }
 
@@ -158,9 +171,7 @@ async function uploadAudio(blob) {
         const data = await res.json();
         
         if(res.ok) {
-            // Var olan metne ekle (Log tutar gibi)
             const currentText = $('output').innerText;
-            // Placeholder varsa temizle
             if (currentText.includes("Ready to process") || currentText.includes("Processing")) {
                 $('output').innerText = `[${new Date().toLocaleTimeString()}] ${data.text}\n`;
             } else {
@@ -174,7 +185,6 @@ async function uploadAudio(blob) {
                 $('metaProcess').innerText = data.meta.processing_time.toFixed(3) + "s";
                 $('metaSpeed').innerText = "⚡ " + data.meta.rtf.toFixed(1) + "x";
             } else {
-                // Fallback (Standart OpenAI yanıtı ise)
                 $('metaDuration').innerText = data.duration ? data.duration.toFixed(2) + "s" : "--";
                 $('metaProcess').innerText = "--";
                 $('metaSpeed').innerText = "--";
@@ -241,9 +251,8 @@ function visualize() {
         let x = 0;
         for(let i = 0; i < bufferLength; i++) {
             const barHeight = dataArray[i] / 2;
-            // Hands-Free aktifse ve konuşuyorsa Yeşil, değilse Mavi
-            if (isHandsFree && isSpeaking) ctx.fillStyle = `rgb(16, 185, 129)`; // Green
-            else ctx.fillStyle = `rgb(99, 102, 241)`; // Indigo
+            if (isHandsFree && isSpeaking) ctx.fillStyle = `rgb(16, 185, 129)`;
+            else ctx.fillStyle = `rgb(99, 102, 241)`;
 
             ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
             x += barWidth + 1;
@@ -252,11 +261,8 @@ function visualize() {
     draw();
 }
 
-// Listeners
 $('recordBtn').onclick = () => {
-    // Hands-Free kapalıyken manuel durdurma
     if (isRecording) {
-        // Eğer hands-free açıksa durdurma işlemi loop'u da kırmalı
         isHandsFree = false; 
         $('handsFreeToggle').checked = false;
         stopRecording();
@@ -277,7 +283,6 @@ $('handsFreeToggle').onchange = (e) => {
 $('uploadBtn').onclick = () => $('fileInput').click();
 $('fileInput').onchange = (e) => { if(e.target.files[0]) uploadAudio(e.target.files[0]); };
 
-// ... (Health check same) ...
 async function checkHealth() {
     try {
         const res = await fetch('/health');
