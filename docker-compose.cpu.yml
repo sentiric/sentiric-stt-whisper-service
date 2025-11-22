@@ -1,11 +1,11 @@
 services:
   stt-whisper-service:
     image: ghcr.io/sentiric/sentiric-stt-whisper-service:latest
-    # --- EKLENDİ: Lokal Derleme Desteği ---
-    # İmaj registry'de yoksa veya yerel geliştirme yapılıyorsa buradan derle.
+    
     build:
       context: .
       dockerfile: Dockerfile
-    # -------------------------------------
+      
     environment:
-      - STT_WHISPER_SERVICE_THREADS=8
+      - STT_WHISPER_SERVICE_DEVICE=cpu
+      - STT_WHISPER_SERVICE_COMPUTE_TYPE=int8

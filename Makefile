@@ -1,29 +1,34 @@
-.PHONY: help up-cpu up-gpu down logs clean
+.PHONY: help up-cpu up-gpu down logs clean test
 
 help:
-	@echo "🎧 Sentiric STT Whisper Service (C++)"
-	@echo "-------------------------------------"
-	@echo "make up-cpu   : Servisi CPU modunda başlatır (Dev Mode)"
-	@echo "make up-gpu   : Servisi GPU modunda başlatır"
-	@echo "make down     : Servisi durdurur"
-	@echo "make logs     : Logları izler"
-	@echo "make clean    : Temizlik"
+	@echo "🎧 Sentiric STT Whisper Service (C++) Yönetim Paneli"
+	@echo "---------------------------------------------------"
+	@echo "make up-cpu   : Servisi CPU modunda başlatır (Local Dev)"
+	@echo "make up-gpu   : Servisi GPU modunda başlatır (Local Dev)"
+	@echo "make down     : Servisi ve ağları temizler"
+	@echo "make logs     : Canlı logları izler"
+	@echo "make test     : E2E Test senaryosunu çalıştırır"
+	@echo "make clean    : Tüm build artıklarını ve konteynerleri siler"
 
+# CPU Modu: Base + CPU + Override (Local Mounts)
 up-cpu:
-	# Override dosyasını da dahil et ki yerel 'models' klasörü mount edilsin.
 	docker compose -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.override.yml up --build -d
 
+# GPU Modu: Base + GPU + Override (Local Mounts)
 up-gpu:
-	# GPU için de override dosyasını eklemek iyi fikirdir.
-	docker compose -f docker-compose.yml -f docker-compose.gpu.yml  up --build -d
+	docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.override.yml up --build -d
 
+# Temizlik: Tüm dosya kombinasyonlarını dikkate alarak indir
 down:
-	# Down ederken de tüm dosyaları belirtmek en temizidir.
 	docker compose -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.gpu.yml -f docker-compose.override.yml down --remove-orphans
 
 logs:
 	docker compose logs -f stt-whisper-service
 
+test:
+	./e2e-test.sh
+
 clean:
 	rm -rf build/
-	docker compose down -v
+	@make down
+	@echo "🧹 Temizlik tamamlandı."
