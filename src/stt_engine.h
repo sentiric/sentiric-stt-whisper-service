@@ -25,10 +25,19 @@ public:
 
     // PCM verisini (32-bit float) işler ve metin döndürür
     // input_sample_rate: Verinin orijinal örnekleme hızı (varsayılan 16000)
-    std::vector<TranscriptionResult> transcribe(const std::vector<float>& pcmf32, int input_sample_rate = 16000);
+        // language parametresi eklendi (Varsayılan: config'deki değer)
+    std::vector<TranscriptionResult> transcribe(
+        const std::vector<float>& pcmf32, 
+        int input_sample_rate = 16000,
+        const std::string& language = "" 
+    );
 
     // Raw 16-bit PCM verisini işler (dönüştürme ve resampling yapar)
-    std::vector<TranscriptionResult> transcribe_pcm16(const std::vector<int16_t>& pcm16, int input_sample_rate = 16000);
+        std::vector<TranscriptionResult> transcribe_pcm16(
+        const std::vector<int16_t>& pcm16, 
+        int input_sample_rate = 16000,
+        const std::string& language = ""
+    );
 
 private:
     // Ses verisini yeniden örnekler (Resampling)

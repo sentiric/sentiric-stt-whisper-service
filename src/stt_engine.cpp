@@ -69,29 +69,35 @@ std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, in
     return output;
 }
 
-std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(const std::vector<int16_t>& pcm16, int input_sample_rate) {
-    // 1. Adım: 16-bit INT -> 32-bit FLOAT dönüşümü (normalize)
-    // Whisper 32-bit float ve -1.0 ile 1.0 arasında değer bekler.
+std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
+    const std::vector<int16_t>& pcm16, 
+    int input_sample_rate,
+    const std::string& language // Eklendi
+) {
+    // 1. Normalization
     std::vector<float> pcmf32(pcm16.size());
     for (size_t i = 0; i < pcm16.size(); ++i) {
         pcmf32[i] = static_cast<float>(pcm16[i]) / 32768.0f;
     }
 
-    // 2. Adım: Resampling (Eğer gerekliyse)
-    // Whisper genellikle 16000 Hz bekler.
+    // 2. Resampling
     if (input_sample_rate != 16000) {
         pcmf32 = resample_audio(pcmf32, input_sample_rate, 16000);
     }
 
-    return transcribe(pcmf32);
+    return transcribe(pcmf32, 16000, language); // Dili ilet
 }
 
-std::vector<TranscriptionResult> SttEngine::transcribe(const std::vector<float>& pcmf32, int input_sample_rate) {
+std::vector<TranscriptionResult> SttEngine::transcribe(
+    const std::vector<float>& pcmf32, 
+    int input_sample_rate,
+    const std::string& language // Eklendi
+) {
     std::lock_guard<std::mutex> lock(mutex_); 
 
     if (!ctx_) return {};
 
-    // Resampling (Aynı)
+    // Resampling Logic (Aynı kalıyor)
     std::vector<float> processed_audio;
     if (input_sample_rate != 16000) {
         processed_audio = resample_audio(pcmf32, input_sample_rate, 16000);
@@ -99,10 +105,7 @@ std::vector<TranscriptionResult> SttEngine::transcribe(const std::vector<float>&
         processed_audio = pcmf32;
     }
 
-    // --- PARAMETRE ENTEGRASYONU (YENİ) ---
-    // Config'den gelen değerleri whisper_full_params'a aktarıyoruz.
-    
-    // Strateji seçimi: Beam Size > 1 ise BEAM_SEARCH kullan
+    // Whisper Params
     whisper_sampling_strategy strategy = (settings_.beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
     whisper_full_params wparams = whisper_full_default_params(strategy);
     
@@ -112,8 +115,19 @@ std::vector<TranscriptionResult> SttEngine::transcribe(const std::vector<float>&
     wparams.print_special = false;
     
     wparams.translate = settings_.translate;
-    wparams.language = settings_.language.c_str();
+
     wparams.n_threads = settings_.n_threads;
+
+    // --- DİL SEÇİMİ MANTIĞI (FIX) ---
+    // 1. İstekten gelen dil varsa onu kullan.
+    // 2. Yoksa, ayarlardaki varsayılan dili kullan.
+    // 3. O da yoksa "auto" kullan.
+    std::string target_lang = language;
+    if (target_lang.empty()) {
+        target_lang = settings_.language;
+    }    
+
+    wparams.language = settings_.language.c_str();    
     
     // Advanced Settings (Config'den)
     wparams.temperature = settings_.temperature;
@@ -137,23 +151,18 @@ std::vector<TranscriptionResult> SttEngine::transcribe(const std::vector<float>&
         spdlog::error("Whisper failed to process audio");
         return {};
     }
-
-    // ... (Sonuç toplama kısmı aynı) ...
+    
+    // ... (Sonuç toplama aynı)
     std::vector<TranscriptionResult> results;
     const int n_segments = whisper_full_n_segments(ctx_);
-    
     for (int i = 0; i < n_segments; ++i) {
         const char* text = whisper_full_get_segment_text(ctx_, i);
         const int64_t t0 = whisper_full_get_segment_t0(ctx_, i);
         const int64_t t1 = whisper_full_get_segment_t1(ctx_, i);
         
-        // Olasılık (confidence) hesabı - Segment bazlı
-        // whisper.cpp API'sinde segment olasılığı doğrudan yok, token'lardan hesaplanabilir
-        // Şimdilik dummy bırakıyoruz veya loglardan okuyoruz.
-        float prob = 1.0f; 
-
-        results.push_back({std::string(text), settings_.language, prob, t0, t1});
+        // Olasılık hesaplama eksiği vardı, onu da basitçe tamamlayalım
+        // Whisper segment probu vermiyor ama token probu veriyor. Şimdilik 1.0 kalsın.
+        results.push_back({std::string(text), target_lang, 1.0f, t0, t1});
     }
-
     return results;
 }

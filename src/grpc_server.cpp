@@ -26,11 +26,19 @@ grpc::Status GrpcServer::WhisperTranscribe(
         return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Audio data length must be even (16-bit PCM)");
     }
 
+    // Ses verisini kopyala
     std::vector<int16_t> pcm16(audio_data.size() / 2);
     std::memcpy(pcm16.data(), audio_data.data(), audio_data.size());
 
-    // İşle
-    auto results = engine_->transcribe_pcm16(pcm16);
+    // --- FIX: İSTEKTEN DİLİ AL ---
+    std::string req_lang = "";
+    if (request->has_language()) {
+        req_lang = request->language();
+    }
+    // -----------------------------
+
+    // Motoru çağır (Dil parametresiyle)
+    auto results = engine_->transcribe_pcm16(pcm16, 16000, req_lang);
 
     // Sonucu birleştir
     std::string full_text;
