@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
+#include <numeric> // accumulate için
+
 
 SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
@@ -38,9 +40,8 @@ bool SttEngine::is_ready() const {
 }
 
 std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, int src_rate, int target_rate) {
-    if (src_rate == target_rate || input.empty()) {
-        return input;
-    }
+    // ... (Bu fonksiyon içeriği öncekiyle birebir aynı) ...
+    if (src_rate == target_rate || input.empty()) return input;
 
     double ratio = (double)target_rate / (double)src_rate;
     long output_frames = (long)(input.size() * ratio) + 100; 
@@ -55,12 +56,10 @@ std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, in
     src_data.end_of_input = 0; 
 
     int error = src_simple(&src_data, SRC_SINC_FASTEST, 1); 
-
     if (error) {
         spdlog::error("Libsamplerate error: {}", src_strerror(error));
         return input; 
     }
-
     output.resize(src_data.output_frames_gen);
     return output;
 }
@@ -106,11 +105,7 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.print_timestamps = !settings_.no_timestamps;
     wparams.print_special = false;
     wparams.token_timestamps = true; 
-    
-    // --- KRİTİK AYAR: SES EFEKTLERİNİ SUSTUR ---
-    // [Music], [Roars], [Silence] gibi çıktıları engeller.
     wparams.suppress_non_speech_tokens = true;
-    // -------------------------------------------
 
     wparams.translate = settings_.translate;
     wparams.n_threads = settings_.n_threads;
@@ -129,9 +124,10 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         wparams.greedy.best_of = settings_.best_of;
     }
 
+    // Thresholds (Biraz daha katılaştırdık)
     wparams.entropy_thold = 2.40f;
-    wparams.logprob_thold = settings_.logprob_threshold;
-    wparams.no_speech_thold = settings_.no_speech_threshold;
+    wparams.logprob_thold = -1.0f; 
+    wparams.no_speech_thold = 0.6f; 
 
     if (whisper_full(ctx_, wparams, processed_audio.data(), processed_audio.size()) != 0) {
         spdlog::error("Whisper failed to process audio");
@@ -141,6 +137,10 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     std::vector<TranscriptionResult> results;
     const int n_segments = whisper_full_n_segments(ctx_);
     
+    // --- HALLUCINATION FILTER PARAMETERS ---
+    // Eğer kelimelerin ortalama güvenilirliği bu değerin altındaysa çöpe at.
+    const float MIN_AVG_TOKEN_PROB = 0.40f; 
+    
     for (int i = 0; i < n_segments; ++i) {
         const char* text = whisper_full_get_segment_text(ctx_, i);
         const int64_t t0 = whisper_full_get_segment_t0(ctx_, i);
@@ -148,6 +148,8 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         
         std::vector<TokenData> tokens;
         int n_tokens = whisper_full_n_tokens(ctx_, i);
+        double total_prob = 0.0;
+        int valid_token_count = 0;
         
         for (int j = 0; j < n_tokens; ++j) {
             auto data = whisper_full_get_token_data(ctx_, i, j);
@@ -155,15 +157,30 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             
             if (data.id >= whisper_token_eot(ctx_)) continue; 
 
+            // Token verisini kaydet
             tokens.push_back({
                 std::string(token_text),
                 data.p,
                 data.t0,
                 data.t1
             });
+
+            // Güven hesabı için topla
+            total_prob += data.p;
+            valid_token_count++;
         }
 
-        results.push_back({std::string(text), target_lang, 1.0f, t0, t1, tokens});
+        // --- GÜVEN FİLTRESİ ---
+        // Kelimelerin ortalamasını al.
+        float avg_prob = (valid_token_count > 0) ? (float)(total_prob / valid_token_count) : 0.0f;
+        
+        // "Bu dizinin betimlemesi..." gibi halüsinasyonlarda avg_prob genellikle 0.10 - 0.30 arasındadır.
+        if (avg_prob < MIN_AVG_TOKEN_PROB && valid_token_count > 0) {
+            spdlog::warn("🗑️ Discarded hallucination (Avg Prob: {:.2f}): {}", avg_prob, text);
+            continue; // Bu segmenti sonuca ekleme!
+        }
+
+        results.push_back({std::string(text), target_lang, avg_prob, t0, t1, tokens});
     }
     
     return results;
