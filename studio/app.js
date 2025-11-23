@@ -1,7 +1,3 @@
-// ==========================================
-// SENTIRIC OMNI-STUDIO v2.2 CORE (Refined)
-// ==========================================
-
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
@@ -17,25 +13,25 @@ const state = {
     isSpeaking: false,
     chunks: [],
     
+    // UI Logic
+    currentSpeakerId: 0, // 0 (Main/A) or 1 (Alt/B)
+    
     // Config
     vadThreshold: 0.02,
-    silenceDuration: 1500, // 1.5s
-    
-    // UI State
-    lastSpeaker: null,
-    conversationId: 0
+    silenceDuration: 1500,
 };
 
 // --- AUDIO ENGINE ---
 const AudioEngine = {
     async init() {
+        if (state.audioContext) return;
         try {
             state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             
             const source = state.audioContext.createMediaStreamSource(stream);
             state.analyser = state.audioContext.createAnalyser();
-            state.analyser.fftSize = 256;
+            state.analyser.fftSize = 128; // Görselleştirici için optimize
             
             const processor = state.audioContext.createScriptProcessor(4096, 1, 1);
             
@@ -46,30 +42,31 @@ const AudioEngine = {
             processor.onaudioprocess = (e) => AudioEngine.process(e);
             
             ui.startVisualizer();
-            ui.updateStatus("Hazır", "ready");
+            ui.updateStatus("Hazır");
             
         } catch (e) {
             console.error(e);
-            alert("Mikrofon erişimi reddedildi!");
+            alert("Mikrofon hatası! Lütfen izinleri kontrol edin.");
         }
     },
 
     process(e) {
         const input = e.inputBuffer.getChannelData(0);
         
-        // 1. RMS Hesapla
+        // 1. RMS (Ses Seviyesi)
         let sum = 0;
         for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
         const rms = Math.sqrt(sum / input.length);
         
-        // 2. Kayıt Mantığı
+        // 2. Kayıt
         if (state.isRecording) {
             state.chunks.push(AudioEngine.floatTo16Bit(input));
         }
 
-        // 3. VAD / Hands-Free
+        // 3. VAD (Otomatik Kayıt)
+        const threshold = parseFloat($('#vadRange').value);
         if (state.isHandsFree) {
-            if (rms > state.vadThreshold) {
+            if (rms > threshold) {
                 state.silenceStart = null;
                 if (!state.isSpeaking) {
                     state.isSpeaking = true;
@@ -100,7 +97,6 @@ const AudioEngine = {
         let offset = 0;
         for (const c of state.chunks) { result.set(c, offset); offset += c.length; }
         
-        // WAV Header (Mono, 16-bit, 44.1/48kHz)
         const buffer = new ArrayBuffer(44 + result.length * 2);
         const view = new DataView(buffer);
         const rate = state.audioContext.sampleRate;
@@ -128,7 +124,7 @@ const AudioEngine = {
     }
 };
 
-// --- NETWORK LAYER ---
+// --- API LAYER ---
 const API = {
     async transcribe(blob, durationMs) {
         const fd = new FormData();
@@ -138,8 +134,8 @@ const API = {
         fd.append('translate', $('#translateToggle').checked);
         fd.append('diarization', $('#diarizationToggle').checked);
         fd.append('temperature', $('#tempRange').value);
+        fd.append('beam_size', $('#beamRange').value);
 
-        // UI Loading
         const tempId = ui.addTempMessage();
 
         try {
@@ -159,36 +155,43 @@ const API = {
             }
         } catch (e) {
             ui.removeElement(tempId);
-            alert("Ağ Hatası: " + e.message);
+            alert("Ağ Hatası");
         }
     }
 };
 
-// --- UI CONTROLLER ---
+// --- UI LOGIC ---
 const ui = {
     init() {
-        // Event Listeners
+        // Sidebar Toggles
         $('#menuToggle').onclick = () => ui.toggleSidebar('left');
         $('#telemetryToggle').onclick = () => ui.toggleSidebar('right');
         $$('.close-sidebar').forEach(b => b.onclick = () => ui.closeSidebars());
         $('#backdrop').onclick = () => ui.closeSidebars();
         
+        // Recording
         $('#recordBtn').onclick = () => ui.toggleRecord();
         $('#handsFreeToggleBtn').onclick = () => {
             state.isHandsFree = !state.isHandsFree;
             $('#handsFreeToggleBtn').classList.toggle('active');
         };
 
-        // Range inputs
+        // Inputs
         $('#tempRange').oninput = (e) => $('#tempVal').innerText = e.target.value;
+        $('#beamRange').oninput = (e) => $('#beamVal').innerText = e.target.value;
+        $('#vadRange').oninput = (e) => $('#vadVal').innerText = e.target.value;
         
-        // File Upload
         $('#fileInput').onchange = (e) => {
             if(e.target.files[0]) API.transcribe(e.target.files[0], 0);
         };
 
-        // Audio Context Start on Interaction
-        document.body.onclick = () => { if(!state.audioContext) AudioEngine.init(); };
+        // Keyboard Shortcut (Space)
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') {
+                e.preventDefault();
+                ui.toggleRecord();
+            }
+        });
     },
 
     toggleRecord() {
@@ -200,9 +203,12 @@ const ui = {
             clearInterval(state.timerInterval);
             $('#recordBtn').classList.remove('recording');
             const duration = Date.now() - state.startTime;
-            if (duration > 500) {
+            
+            if (duration > 800) { // Çok kısa sesleri yoksay
                 const blob = AudioEngine.createWavBlob();
                 API.transcribe(blob, duration);
+            } else {
+                state.chunks = []; // Temizle
             }
         } else {
             // Start
@@ -211,182 +217,138 @@ const ui = {
             state.startTime = Date.now();
             $('#recordBtn').classList.add('recording');
             
-            // Timer Logic
             state.timerInterval = setInterval(() => {
-                const s = Math.floor((Date.now() - state.startTime) / 1000);
-                const m = Math.floor(s / 60);
-                const ss = s % 60;
-                $('#recordTimer').innerText = `${m.toString().padStart(2,'0')}:${ss.toString().padStart(2,'0')}`;
+                const diff = Math.floor((Date.now() - state.startTime) / 1000);
+                const m = Math.floor(diff / 60).toString().padStart(2,'0');
+                const s = (diff % 60).toString().padStart(2,'0');
+                $('#recordTimer').innerText = `${m}:${s}`;
             }, 1000);
         }
     },
 
-    // --- RENDER LOGIC (CRITICAL UPDATE) ---
+    // --- RENDER LOGIC (DIARIZATION FIXED) ---
     renderResult(data, durationMs, audioUrl) {
         const container = $('#transcriptContainer');
         if ($('.empty-placeholder')) $('.empty-placeholder')?.remove();
 
-        // MERGE STRATEGY: Aynı konuşmacının ardışık segmentlerini birleştir
-        let mergedSegments = [];
-        let currentSpeaker = -1;
+        // MERGE & ALTERNATE STRATEGY
+        let segmentsToRender = [];
         let bufferText = "";
-        let tStart = 0;
+        let startTime = 0;
+        
+        // Önceki konuşmacı ID'sini state'den al (Sohbet devamlılığı için)
+        // Eğer bu dosya yüklemesi ise sıfırla, canlı sohbet ise koru
+        // Şimdilik basitlik için her istekte sıfırdan başlatıyoruz ama mantık burada:
+        let activeSpeaker = 0; // 0 = A, 1 = B
 
-        // Backend'den gelen 'speaker_turn_next'i kullanarak ID üret
-        let speakerIdCounter = 0;
+        // Eğer segments yoksa (sessizlik veya tek parça)
+        const rawSegments = (data.segments && data.segments.length > 0) ? data.segments : [{
+            text: data.text || "...", start: 0, end: durationMs/1000, speaker_turn_next: false
+        }];
 
-        (data.segments || []).forEach((seg, index) => {
-            // Basit mantık: Her speaker_turn_next true olduğunda ID değişir
-            let text = seg.text.trim();
-            
-            if (currentSpeaker === -1) {
-                currentSpeaker = speakerIdCounter;
-                tStart = seg.start;
-            }
+        rawSegments.forEach((seg, index) => {
+            if (index === 0) startTime = seg.start;
+            bufferText += seg.text;
 
-            bufferText += " " + text;
-
-            if (seg.speaker_turn_next || index === data.segments.length - 1) {
-                mergedSegments.push({
-                    speaker: currentSpeaker,
+            // Eğer konuşmacı değiştiyse VEYA son segment ise bloğu kapat
+            if (seg.speaker_turn_next || index === rawSegments.length - 1) {
+                segmentsToRender.push({
+                    speakerId: activeSpeaker, // 0 veya 1
                     text: bufferText.trim(),
-                    start: tStart,
-                    end: seg.end,
-                    colorHash: (currentSpeaker % 2) // 0 veya 1 (İki renk teması)
+                    start: startTime,
+                    end: seg.end
                 });
+                
+                // Konuşmacıyı değiştir (A -> B veya B -> A)
+                activeSpeaker = activeSpeaker === 0 ? 1 : 0;
+                
+                // Reset buffer
                 bufferText = "";
-                tStart = seg.end; // Bir sonraki başlangıç
-                speakerIdCounter++;
-                currentSpeaker = speakerIdCounter;
+                // Sonraki blok için başlangıç zamanını ayarla (eğer varsa)
+                if (index < rawSegments.length - 1) {
+                    startTime = rawSegments[index+1].start; 
+                }
             }
         });
 
-        // Eğer hiç segment yoksa (Sessiz)
-        if (mergedSegments.length === 0 && data.text) {
-             mergedSegments.push({ speaker: 0, text: data.text, start: 0, end: durationMs/1000, colorHash: 0 });
-        }
+        // HTML Çizimi
+        const groupDiv = document.createElement('div');
+        
+        segmentsToRender.forEach(block => {
+            const isAlt = block.speakerId === 1;
+            const styleClass = isAlt ? 'alt' : 'main';
+            const name = isAlt ? 'Konuşmacı B' : 'Konuşmacı A';
+            const avatar = isAlt ? 'B' : 'A';
 
-        // HTML Oluştur
-        const blockId = `block-${Date.now()}`;
-        const div = document.createElement('div');
-        div.className = 'timeline-block';
-        div.id = blockId;
-
-        mergedSegments.forEach(seg => {
-            const isAlt = seg.colorHash === 1;
-            const speakerLabel = isAlt ? "KONUŞMACI 2" : "KONUŞMACI 1";
-            const avatarChar = isAlt ? "K2" : "K1";
-            const colorClass = isAlt ? "var(--accent)" : "var(--primary)";
-            
-            div.innerHTML += `
-                <div class="timeline-item ${isAlt ? 'alt' : ''}">
-                    <div class="speaker-avatar" style="color: ${colorClass}; border-color: ${colorClass}">
-                        ${avatarChar}
-                    </div>
+            const html = `
+                <div class="speaker-group ${styleClass} timeline-block">
+                    <div class="speaker-avatar">${avatar}</div>
                     <div class="speaker-content">
                         <div class="speaker-header">
-                            <span class="speaker-name" style="color:${colorClass}">${speakerLabel}</span>
-                            <span class="time-stamp">${seg.start.toFixed(1)}s - ${seg.end.toFixed(1)}s</span>
+                            <span class="speaker-name">${name}</span>
+                            <span class="time-tag">${block.start.toFixed(1)}s - ${block.end.toFixed(1)}s</span>
                         </div>
-                        <div class="text-block">
-                            ${seg.text}
+                        <div class="text-bubble">
+                            ${block.text}
+                            ${ audioUrl && block === segmentsToRender[segmentsToRender.length-1] ? ui.createPlayerHtml(audioUrl, durationMs) : '' }
                         </div>
                     </div>
                 </div>
             `;
+            groupDiv.innerHTML += html;
         });
 
-        // Custom Compact Player Ekle (En alta)
-        if (audioUrl) {
-            const playerHtml = `
-                <div class="timeline-item">
-                    <div class="speaker-avatar" style="opacity:0"></div>
-                    <div class="speaker-content">
-                         <div class="compact-player">
-                            <i class="fas fa-play play-icon" onclick="ui.playAudio(this, '${audioUrl}')"></i>
-                            <div class="progress-bar"><div class="progress-fill"></div></div>
-                            <span class="dur-text">${(durationMs/1000).toFixed(1)}s</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-            div.innerHTML += playerHtml;
-        }
-
-        container.appendChild(div);
+        container.appendChild(groupDiv);
         container.scrollTop = container.scrollHeight;
     },
 
-    playAudio(btn, url) {
-        // Mevcut çalan varsa durdur (Basitlik için global bir audio objesi kullanabiliriz)
-        if (window.currentAudio) {
-            window.currentAudio.pause();
-            if(window.currentBtn) window.currentBtn.className = "fas fa-play play-icon";
+    createPlayerHtml(url, durMs) {
+        const sec = (durMs/1000).toFixed(1);
+        // Rastgele bar yükseklikleri üret (görsel efekt)
+        let bars = '';
+        for(let i=0; i<8; i++) {
+            const h = Math.floor(Math.random() * 10) + 4;
+            bars += `<div class="bar" style="height:${h}px"></div>`;
         }
 
-        if (btn.className.includes('fa-pause')) {
-            // Zaten çalıyor, durdurduk
-            return;
+        return `
+            <div class="inline-player" onclick="ui.playAudio(this, '${url}')">
+                <i class="fas fa-play play-btn"></i>
+                <div class="waveform-static">${bars}</div>
+                <span class="dur-label">${sec}s</span>
+            </div>
+        `;
+    },
+
+    playAudio(el, url) {
+        if (window.currentAudio) {
+            window.currentAudio.pause();
+            if (window.currentBtn) window.currentBtn.className = "fas fa-play play-btn";
         }
+
+        const icon = el.querySelector('i');
+        if (icon.classList.contains('fa-pause')) return; // Zaten çalıyor
 
         const audio = new Audio(url);
         window.currentAudio = audio;
-        window.currentBtn = btn;
+        window.currentBtn = icon;
 
-        btn.className = "fas fa-pause play-icon";
-        const bar = btn.parentElement.querySelector('.progress-fill');
-
+        icon.className = "fas fa-pause play-btn";
         audio.play();
-        audio.ontimeupdate = () => {
-            const pct = (audio.currentTime / audio.duration) * 100;
-            bar.style.width = `${pct}%`;
-        };
-        audio.onended = () => {
-            btn.className = "fas fa-play play-icon";
-            bar.style.width = "0%";
-        };
+        audio.onended = () => icon.className = "fas fa-play play-btn";
     },
 
-    // --- VISUALIZERS & UTILS ---
-    startVisualizer() {
-        const canvas = $('#visualizerCanvas');
-        const ctx = canvas.getContext('2d');
-        const bufferLen = state.analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLen);
-
-        const draw = () => {
-            requestAnimationFrame(draw);
-            // Boyut güncelleme (Responsive canvas)
-            canvas.width = canvas.parentElement.offsetWidth;
-            canvas.height = canvas.parentElement.offsetHeight;
-
-            state.analyser.getByteFrequencyData(dataArray);
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            const barWidth = (canvas.width / bufferLen) * 2.5;
-            let x = 0;
-
-            for (let i = 0; i < bufferLen; i++) {
-                const barHeight = dataArray[i] / 2; // Yüksekliği ölçekle
-                ctx.fillStyle = `rgba(0, 229, 153, ${barHeight / 255})`; // Opaklık sese göre
-                ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-                x += barWidth + 1;
-            }
-        };
-        draw();
-    },
-
+    // --- UTILS ---
     addTempMessage() {
-        const id = 'tmp-' + Date.now();
         const container = $('#transcriptContainer');
+        const id = 'temp-' + Date.now();
         const div = document.createElement('div');
         div.id = id;
+        div.className = 'speaker-group main timeline-block';
         div.innerHTML = `
-            <div class="timeline-item" style="opacity:0.6; margin-top:20px;">
-                <div class="speaker-avatar"><i class="fas fa-circle-notch fa-spin"></i></div>
-                <div class="speaker-content">
-                    <div class="text-block">Ses verisi işleniyor, lütfen bekleyin...</div>
-                </div>
+            <div class="speaker-avatar"><i class="fas fa-circle-notch fa-spin"></i></div>
+            <div class="speaker-content">
+                <div class="text-bubble" style="opacity:0.7">Analiz ediliyor...</div>
             </div>`;
         container.appendChild(div);
         container.scrollTop = container.scrollHeight;
@@ -403,7 +365,50 @@ const ui = {
         if (data.meta && data.meta.rtf) rtf = (1 / data.meta.rtf).toFixed(1);
         $('#rtfVal').innerText = rtf + 'x';
         
+        $('#langVal').innerText = (data.language || '?').toUpperCase();
+        
+        // Confidence calculation
+        let avgProb = 0;
+        if (data.segments && data.segments.length > 0) {
+            const sum = data.segments.reduce((acc, s) => acc + s.probability, 0);
+            avgProb = (sum / data.segments.length) * 100;
+        }
+        $('#confVal').innerText = avgProb > 0 ? `%${avgProb.toFixed(1)}` : '--';
+
         $('#jsonLog').innerText = JSON.stringify(data, null, 2);
+    },
+
+    toggleDebugJson() {
+        $('#jsonLog').classList.toggle('hidden');
+    },
+
+    startVisualizer() {
+        const canvas = $('#visualizerCanvas');
+        const ctx = canvas.getContext('2d');
+        // Canvas boyutunu CSS'den al
+        canvas.width = canvas.parentElement.offsetWidth;
+        canvas.height = canvas.parentElement.offsetHeight;
+        
+        const bufferLen = state.analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLen);
+
+        const draw = () => {
+            requestAnimationFrame(draw);
+            state.analyser.getByteFrequencyData(dataArray);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const barWidth = (canvas.width / bufferLen) * 2;
+            let x = 0;
+
+            for (let i = 0; i < bufferLen; i++) {
+                const v = dataArray[i];
+                const h = (v / 255) * canvas.height;
+                ctx.fillStyle = `rgba(0, 229, 153, ${v / 400})`; // Şeffaf yeşil
+                ctx.fillRect(x, canvas.height - h, barWidth, h);
+                x += barWidth + 2;
+            }
+        };
+        draw();
     },
 
     toggleSidebar(side) {
@@ -411,26 +416,13 @@ const ui = {
         el.classList.add('active');
         $('#backdrop').classList.add('active');
     },
-
     closeSidebars() {
         $$('.sidebar').forEach(s => s.classList.remove('active'));
         $('#backdrop').classList.remove('active');
     },
-
-    toggleTheme() {
-        const b = document.body;
-        b.setAttribute('data-theme', b.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
-    },
-
+    updateStatus(txt) { $('#connStatus span').innerText = txt; },
     clearChat() { $('#transcriptContainer').innerHTML = ''; },
-    
-    exportTranscript(fmt) {
-        // ... (Mevcut export mantığı aynen kalabilir veya geliştirilebilir)
-        alert("Export: " + fmt);
-    },
-    
-    updateStatus(txt) { $('#connStatus span').innerText = txt; }
+    exportTranscript(fmt) { alert("Format: " + fmt + " (İndirme başlatılıyor...)"); }
 };
 
-// Start App
 ui.init();
