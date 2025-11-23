@@ -43,7 +43,7 @@ include(FetchContent)
 FetchContent_Declare(
   sentiric_contracts
   GIT_REPOSITORY https://github.com/sentiric/sentiric-contracts.git
-  GIT_TAG v1.11.1
+  GIT_TAG v1.11.2
 )
 FetchContent_MakeAvailable(sentiric_contracts)
 
