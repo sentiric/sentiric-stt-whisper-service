@@ -93,6 +93,8 @@ add_executable(stt_service
     src/grpc_server.cpp
     src/http_server.cpp
     # src/utils.h header only olduğu için buraya eklemeye gerek yok ama IDE için iyi olur
+    src/prosody_extractor.cpp   # <-- yeni
+    src/speaker_cluster.cpp   # <-- yeni
 )
 add_dependencies(stt_service proto_lib)
 

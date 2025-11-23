@@ -1,6 +1,7 @@
 #pragma once
 #include "config.h"
 #include "whisper.h"
+#include "prosody_extractor.h"   // <-- yeni
 #include <vector>
 #include <string>
 #include <mutex>
@@ -23,21 +24,6 @@ struct RequestOptions {
     float temperature = -1.0f;
     int beam_size = -1;
     int best_of = -1;
-};
-
-struct AffectiveTags {
-    std::string gender_proxy;   // "M" / "F"
-    std::string emotion_proxy;  // "excited" | "neutral" | "sad" | "angry"
-    float arousal = 0.0f;       // 0-1
-    float valence = 0.0f;       // -1..1
-    float pitch_mean = 0.0f;    // Hz
-    float pitch_std = 0.0f;     // Hz
-    float energy_mean = 0.0f;   // RMS
-    float energy_std = 0.0f;
-    float spectral_centroid = 0.0f; // timbre
-    float zero_crossing_rate = 0.0f;
-    // ---- speaker identity vector (8-D) ----
-    std::vector<float> speaker_vec; // 8 eleman
 };
 
 struct TranscriptionResult {

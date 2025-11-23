@@ -1,6 +1,56 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
+// ---------- Speaker Cluster (zero-latency, browser-side) ----------
+class SpeakerClusterer {
+  constructor(threshold = 0.82) {
+    this.threshold = threshold;
+    this.clusters = {}; // { spk_0: { centroid: [], count: 0 }, ... }
+    this.nextId = 0;
+  }
+
+  cosine(a, b) {
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    if (normA === 0 || normB === 0) return 0;
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  }
+
+  assignOrAdd(vec) {
+    let bestId = '';
+    let bestSim = 0;
+    for (const [id, cls] of Object.entries(this.clusters)) {
+      const sim = this.cosine(vec, cls.centroid);
+      if (sim > bestSim) { bestSim = sim; bestId = id; }
+    }
+    if (bestId && bestSim >= this.threshold) {
+      // update centroid (running mean)
+      const cls = this.clusters[bestId];
+      for (let i = 0; i < cls.centroid.length; i++) {
+        cls.centroid[i] = (cls.centroid[i] * cls.count + vec[i]) / (cls.count + 1);
+      }
+      cls.count++;
+      return bestId;
+    }
+    // new cluster
+    const newId = `spk_${this.nextId++}`;
+    this.clusters[newId] = { centroid: [...vec], count: 1 };
+    return newId;
+  }
+}
+
+// ---------- SPEAKER CLUSTER ----------
+const clusterer = new SpeakerClusterer(0.82); // threshold
+const speakerColors = [  // 12 adet farklı renk
+    "#00e599", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#10b981",
+    "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#6366f1", "#14b8a6"
+];
+let speakerNames = {}; // spk_0 -> "Zeynep"
+
 // ---------- GLOBAL PERSISTENT SPEAKER RING ----------
 let nextSpeaker   = 0;        // 0=A, 1=B
 const speakerMeta = {};       // spk_0 -> {gender, emotion, color, vec}
@@ -100,33 +150,39 @@ const ui = {
         const rawSegments = (data.segments && data.segments.length > 0) ? data.segments : [{ text: data.text || "...", start: 0, end: durationMs/1000, speaker_turn_next: false }];
         let bufferText = ""; let startTime = 0; const segmentsToRender = [];
         rawSegments.forEach((seg, idx) => {
-            if (idx === 0) startTime = seg.start; bufferText += seg.text;
+            if (idx === 0) startTime = seg.start;
+            bufferText += seg.text;
             if (seg.speaker_turn_next || idx === rawSegments.length - 1) {
-                const spkId = `spk_${nextSpeaker}`;
+                // ---- CLUSTER ASSIGN ----
+                const spkId = clusterer.assign_or_add(seg.speaker_vec);
                 if (!speakerMeta[spkId]) {
-                    const gender = seg.gender || "?";
-                    const emotion = seg.emotion || "neutral";
-                    const color = nextSpeaker === 0 ? "var(--primary)" : "var(--accent-blue)";
-                    speakerMeta[spkId] = { gender, emotion, color, vec: seg.speaker_vec || [] };
+                    const idxNum = parseInt(spkId.split('_')[1]);
+                    speakerMeta[spkId] = {
+                        gender: seg.gender || "?",
+                        emotion: seg.emotion || "neutral",
+                        color: speakerColors[idxNum % speakerColors.length],
+                        name: speakerNames[spkId] || `Konuşmacı ${String.fromCharCode(65 + idxNum)}`
+                    };
                 }
-                segmentsToRender.push({ speakerId: nextSpeaker, text: bufferText.trim(), start: startTime, end: seg.end });
+                segmentsToRender.push({ speakerId: spkId, text: bufferText.trim(), start: startTime, end: seg.end });
                 nextSpeaker = 1 - nextSpeaker; bufferText = ""; if (idx < rawSegments.length - 1) startTime = rawSegments[idx+1].start; }
         });
         const groupDiv = document.createElement('div');
         segmentsToRender.forEach(block => {
-            const meta = speakerMeta[`spk_${block.speakerId}`];
+            const meta = speakerMeta[spkId];
             const genderIcon = meta.gender === "M" ? "♂" : "♀";
             const emotionEmoji = { excited: "🔥", neutral: "😐", sad: "😢", angry: "😠" }[meta.emotion] || "";
             const pitchBar = Math.min(100, Math.max(0, (meta.vec[0] || 0.5) * 100));
             const energyBar = Math.min(100, Math.max(0, (meta.vec[2] || 0.5) * 100));
             groupDiv.innerHTML += `
                 <div class="speaker-group ${block.speakerId === 0 ? 'main' : 'alt'} timeline-block">
-                    <div class="speaker-avatar" style="border-color:${meta.color};color:${meta.color}" title="Pitch:${(meta.vec[0]*300).toFixed(0)} Hz Energy:${(meta.vec[2]*2).toFixed(2)}">
-                        ${genderIcon}${emotionEmoji}
+                    <div class="speaker-avatar" style="border-color:${meta.color};color:${meta.color}" 
+                        onclick="ui.renameSpeaker('${spkId}')" title="Tıkla & yeniden adlandır">
+                    ${genderIcon}${emotionEmoji}
                     </div>
                     <div class="speaker-content">
                         <div class="speaker-header">
-                            <span class="speaker-name">Konuşmacı ${String.fromCharCode(65 + block.speakerId)}</span>
+                            <span class="speaker-name">${meta.name}</span>
                             <span class="time-tag">${block.start.toFixed(1)}s - ${block.end.toFixed(1)}s</span>
                         </div>
                         <div class="text-bubble">${block.text}${audioUrl && block === segmentsToRender[segmentsToRender.length-1] ? ui.createPlayerHtml(audioUrl, durationMs) : ''}</div>
@@ -138,6 +194,7 @@ const ui = {
                 </div>`;
         });
         container.appendChild(groupDiv); container.scrollTop = container.scrollHeight;
+        lastData = data; lastDur = durationMs; lastUrl = url;
     },
     createPlayerHtml(url, durMs) {
         const sec = (durMs/1000).toFixed(1); let bars = ''; for(let i=0; i<8; i++) bars += `<div class="bar" style="height:${Math.floor(Math.random() * 10) + 4}px"></div>`;
@@ -181,6 +238,18 @@ const ui = {
         const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `sentiric-transcript.${fmt}`; a.click(); URL.revokeObjectURL(url);
     }
 };
+
+ui.renameSpeaker = (id) => {
+    const newName = prompt("Yeni isim:", speakerMeta[id].name);
+    if (newName && newName.trim()) {
+        speakerMeta[id].name = newName.trim();
+        speakerNames[id] = newName.trim();
+        ui.renderResult(lastData, lastDur, lastUrl); // yeniden çiz
+    }
+};
+
+// ---------- GLOBAL CACHE (son render verisi) ----------
+let lastData = null, lastDur = 0, lastUrl = null;
 
 // ---------- STATE ----------
 const state = {

@@ -1,4 +1,5 @@
 #include "stt_engine.h"
+#include "prosody_extractor.h"
 #include "spdlog/spdlog.h"
 #include <samplerate.h>
 #include <stdexcept>
@@ -7,115 +8,7 @@
 #include <numeric>
 #include <cstring>
 
-// ---------- ZENGİN PROSODY + SPEAKER VEC (zero-cost) ----------
-static AffectiveTags extract_prosody(const std::vector<float>& pcm, int sample_rate)
-{
-    AffectiveTags out;
-    const int frame_shift = sample_rate / 100; // 10 ms
-    std::vector<float> f0s;
-    std::vector<float> rmses;
-    std::vector<float> zcrs;
-    std::vector<float> scs;
-
-    // 1) frame-based featurelar
-    for (size_t i = 0; i + 2 * frame_shift < pcm.size(); i += frame_shift)
-    {
-        // ---- F0 (autocorr) ----
-        float r0 = 0, r1 = 0, r2 = 0;
-        for (int k = 0; k < frame_shift; ++k) {
-            float s = pcm[i + k];
-            r0 += s * s; r1 += s * pcm[i + k + 1]; r2 += s * pcm[i + k + 2];
-        }
-        if (r0 < 1e-5f) continue;
-        float m = r1 / (r0 + 1e-6f);
-        float f0 = sample_rate / (2.0f * (m + 1e-6f));
-        if (f0 > 80 && f0 < 400) f0s.push_back(f0);
-
-        // ---- RMS energy ----
-        float rms = std::sqrt(r0 / frame_shift);
-        rmses.push_back(rms);
-
-        // ---- Zero-crossing rate ----
-        int zcr = 0;
-        for (int k = 1; k < frame_shift; ++k)
-            if ((pcm[i + k] >= 0) != (pcm[i + k - 1] >= 0)) ++zcr;
-        zcrs.push_back(static_cast<float>(zcr) / frame_shift);
-
-        // ---- Spectral centroid (basit FFT yok, kaba proxy) ----
-        float power = 0, weighted = 0;
-        for (int k = 1; k < frame_shift; ++k) {
-            float diff = std::abs(pcm[i + k] - pcm[i + k - 1]);
-            weighted += diff * k;
-            power += diff;
-        }
-        float sc = (power > 0) ? weighted / power : 0;
-        scs.push_back(sc);
-    }
-
-    if (f0s.empty()) {
-        out.gender_proxy = "?"; out.emotion_proxy = "neutral";
-        out.pitch_mean = 150; out.pitch_std = 0;
-        out.energy_mean = 0.05; out.energy_std = 0;
-        out.spectral_centroid = 0; out.zero_crossing_rate = 0.1;
-        out.arousal = 0.5; out.valence = 0;
-        out.speaker_vec = std::vector<float>(8, 0.0f);
-        return out;
-    }
-
-    // ---- istatistikler ----
-    auto mean = [](const std::vector<float>& v) -> float {
-        return std::accumulate(v.begin(), v.end(), 0.0f) / v.size();
-    };
-    auto stdev = [](const std::vector<float>& v, float m) -> float {
-        float acc = 0; for (float x : v) acc += (x - m) * (x - m);
-        return std::sqrt(acc / v.size());
-    };
-
-    out.pitch_mean = mean(f0s);
-    out.pitch_std  = stdev(f0s, out.pitch_mean);
-    out.energy_mean = mean(rmses);
-    out.energy_std  = stdev(rmses, out.energy_mean);
-    out.spectral_centroid = mean(scs);
-    out.zero_crossing_rate = mean(zcrs);
-
-    // ---- gender ----
-    out.gender_proxy = (out.pitch_mean > 165.0f) ? "F" : "M";
-
-    // ---- arousal / valence ----
-    out.arousal = std::min(1.0f, out.energy_mean * 20.0f);
-    out.valence = (out.pitch_mean - 150.0f) / 100.0f; // -1..1
-    out.valence = std::max(-1.0f, std::min(1.0f, out.valence));
-
-    // ---- emotion ----
-    if (out.arousal > 0.65f && out.valence > 0.4f)       out.emotion_proxy = "excited";
-    else if (out.arousal > 0.65f && out.valence < -0.3f) out.emotion_proxy = "angry";
-    else if (out.arousal < 0.35f)                         out.emotion_proxy = "sad";
-    else                                                   out.emotion_proxy = "neutral";
-
-    // ---- 8-D speaker vec (pitch, energy, timbre) ----
-    out.speaker_vec.resize(8);
-    out.speaker_vec[0] = out.pitch_mean / 300.0f;
-    out.speaker_vec[1] = out.pitch_std / 50.0f;
-    out.speaker_vec[2] = out.energy_mean;
-    out.speaker_vec[3] = out.energy_std;
-    out.speaker_vec[4] = out.spectral_centroid / 1000.0f;
-    out.speaker_vec[5] = out.zero_crossing_rate;
-    out.speaker_vec[6] = out.arousal;
-    out.speaker_vec[7] = (out.valence + 1.0f) / 2.0f; // 0..1
-    return out;
-}
-
-// ---------- KÜMELEME YARDIMCI ----------
-static float cosine(const std::vector<float>& a, const std::vector<float>& b)
-{
-    float dot = 0, normA = 0, normB = 0;
-    for (size_t i = 0; i < a.size(); ++i) { dot += a[i] * b[i]; normA += a[i] * a[i]; normB += b[i] * b[i]; }
-    if (normA == 0 || normB == 0) return 0;
-    return dot / (std::sqrt(normA) * std::sqrt(normB));
-}
-
-SttEngine::SttEngine(const Settings& settings) : settings_(settings)
-{
+SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
     spdlog::info("Loading Whisper model from: {}", model_path);
     struct whisper_context_params cparams = whisper_context_default_params();
@@ -144,8 +37,7 @@ SttEngine::SttEngine(const Settings& settings) : settings_(settings)
     }
 }
 
-SttEngine::~SttEngine()
-{
+SttEngine::~SttEngine() {
     for(auto* state : all_states_) whisper_free_state(state);
     if (ctx_) whisper_free(ctx_);
     if (vad_ctx_) whisper_vad_free(vad_ctx_);
@@ -153,8 +45,7 @@ SttEngine::~SttEngine()
 
 bool SttEngine::is_ready() const { return ctx_ != nullptr; }
 
-struct whisper_state* SttEngine::acquire_state()
-{
+struct whisper_state* SttEngine::acquire_state() {
     std::unique_lock<std::mutex> lock(pool_mutex_);
     pool_cv_.wait(lock, [this]{ return !state_pool_.empty(); });
     struct whisper_state* state = state_pool_.front();
@@ -162,15 +53,13 @@ struct whisper_state* SttEngine::acquire_state()
     return state;
 }
 
-void SttEngine::release_state(struct whisper_state* state)
-{
+void SttEngine::release_state(struct whisper_state* state) {
     std::lock_guard<std::mutex> lock(pool_mutex_);
     state_pool_.push(state);
     pool_cv_.notify_one();
 }
 
-std::vector<float> SttEngine::resample_audio(const float* input, size_t input_size, int src_rate, int target_rate)
-{
+std::vector<float> SttEngine::resample_audio(const float* input, size_t input_size, int src_rate, int target_rate) {
     if (src_rate == target_rate || input_size == 0) return {};
     double ratio = static_cast<double>(target_rate) / static_cast<double>(src_rate);
     long output_frames = static_cast<long>(input_size * ratio) + 100;
@@ -191,8 +80,7 @@ std::vector<float> SttEngine::resample_audio(const float* input, size_t input_si
     return output;
 }
 
-bool SttEngine::is_speech_detected(const float* pcm, size_t n_samples)
-{
+bool SttEngine::is_speech_detected(const float* pcm, size_t n_samples) {
     if (!vad_ctx_) return true;
     std::lock_guard<std::mutex> lock(vad_mutex_);
     return whisper_vad_detect_speech(vad_ctx_, pcm, static_cast<int>(n_samples));
@@ -225,7 +113,7 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         if (!is_speech_detected(pcm_ptr, pcm_size)) {
             TranscriptionResult empty_res; empty_res.text = ""; empty_res.language = "unknown"; empty_res.prob = 0.0f;
             empty_res.t0 = 0; empty_res.t1 = static_cast<int64_t>(pcm_size / 16.0); empty_res.speaker_turn_next = false;
-            empty_res.affective = extract_prosody({}, 16000); // boş
+            empty_res.affective = extract_prosody({}, 16000); // defaults
             return {empty_res};
         }
     }
@@ -269,13 +157,21 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             float avg_prob = (valid_token_count > 0) ? static_cast<float>(total_prob / valid_token_count) : 0.0f;
             if (avg_prob < MIN_AVG_TOKEN_PROB && valid_token_count > 0) continue;
 
-            // ---- segment prosody ----
-            int seg_start_idx = static_cast<int>(static_cast<double>(t0) / 100.0 * 16);
-            int seg_end_idx   = static_cast<int>(static_cast<double>(t1) / 100.0 * 16);
-            seg_start_idx = std::max(0, seg_start_idx);
-            seg_end_idx   = std::min(static_cast<int>(pcm_size), seg_end_idx);
+            // ---- SAMPLE -> PROSODY (robust) ----
+            int64_t sample_start = static_cast<int64_t>((static_cast<double>(t0) / 100.0) * 16000.0);
+            int64_t sample_end   = static_cast<int64_t>((static_cast<double>(t1) / 100.0) * 16000.0);
+            sample_start = std::max<int64_t>(0, std::min(sample_start, static_cast<int64_t>(pcm_size)));
+            sample_end   = std::max<int64_t>(sample_start, std::min(sample_end, static_cast<int64_t>(pcm_size)));
+            size_t seg_samples = sample_end - sample_start;
+            if (seg_samples < 160) { // 10 ms altı → defaults
+                spdlog::warn("Segment too short for prosody ({} samples), using defaults", seg_samples);
+                auto pros = extract_prosody({}, 16000);
+                results.push_back({ std::string(text), target_lang, avg_prob, t0, t1, speaker_turn_next, tokens,
+                                    pros.gender_proxy, pros.emotion_proxy, pros.arousal, pros.valence, pros });
+                continue;
+            }
             auto pros = extract_prosody(
-                std::vector<float>(pcm_ptr + seg_start_idx, pcm_ptr + seg_end_idx),
+                std::vector<float>(pcm_ptr + sample_start, pcm_ptr + sample_end),
                 16000);
 
             results.push_back({ std::string(text), target_lang, avg_prob, t0, t1, speaker_turn_next, tokens,
