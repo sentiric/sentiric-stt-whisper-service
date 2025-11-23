@@ -41,11 +41,21 @@ grpc::Status GrpcServer::WhisperTranscribe(
     double duration_sec = static_cast<double>(audio.pcm_data.size()) / static_cast<double>(audio.sample_rate);
     response->set_duration(duration_sec);
     // ---- affective ----
-    for (const auto& res : results) {
-        response->set_gender_proxy(res.gender_proxy);
-        response->set_emotion_proxy(res.emotion_proxy);
-        response->set_arousal(res.arousal);
-        response->set_valence(res.valence);
+    if (!results.empty()) {
+        const auto& aff = results[0].affective;
+        response->set_gender_proxy(aff.gender_proxy);
+        response->set_emotion_proxy(aff.emotion_proxy);
+        response->set_arousal(aff.arousal);
+        response->set_valence(aff.valence);
+        // yeniler: proto'ya ekledik
+        response->set_pitch_mean(aff.pitch_mean);
+        response->set_pitch_std(aff.pitch_std);
+        response->set_energy_mean(aff.energy_mean);
+        response->set_energy_std(aff.energy_std);
+        response->set_spectral_centroid(aff.spectral_centroid);
+        response->set_zero_crossing_rate(aff.zero_crossing_rate);
+        // speaker_vec
+        for (float v : aff.speaker_vec) response->add_speaker_vec(v);
     }
     metrics_.audio_seconds_processed_total.Increment(duration_sec);
     auto end_time = std::chrono::steady_clock::now();
@@ -94,10 +104,18 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
         sentiric::stt::v1::WhisperTranscribeStreamResponse response;
         response.set_transcription(results[i].text);
         response.set_is_final(i == results.size() - 1);
-        response.set_gender_proxy(results[i].gender_proxy);
-        response.set_emotion_proxy(results[i].emotion_proxy);
-        response.set_arousal(results[i].arousal);
-        response.set_valence(results[i].valence);
+        const auto& aff = results[i].affective;
+        response.set_gender_proxy(aff.gender_proxy);
+        response.set_emotion_proxy(aff.emotion_proxy);
+        response.set_arousal(aff.arousal);
+        response.set_valence(aff.valence);
+        response.set_pitch_mean(aff.pitch_mean);
+        response.set_pitch_std(aff.pitch_std);
+        response.set_energy_mean(aff.energy_mean);
+        response.set_energy_std(aff.energy_std);
+        response.set_spectral_centroid(aff.spectral_centroid);
+        response.set_zero_crossing_rate(aff.zero_crossing_rate);
+        for (float v : aff.speaker_vec) response.add_speaker_vec(v);
         stream->Write(response);
     }
     double duration_sec = static_cast<double>(full_pcm_buffer.size()) / 16000.0;

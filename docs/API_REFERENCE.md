@@ -71,8 +71,15 @@ Servisin ve modelin durumunu bildirir. Orchestrator (K8s) liveness probe için k
 1.  **Ses Formatı:** Servis dahili olarak **16kHz** örnekleme hızı kullanır. Farklı formatlar (örn: 8kHz) otomatik olarak dönüştürülür (`libsamplerate` ile), ancak en iyi performans için 16kHz WAV önerilir.
 2.  **Concurrency:** `STT_WHISPER_SERVICE_THREADS` ortam değişkeni ile CPU thread kullanımı sınırlanabilir. Varsayılan: 4.
 
-**Yeni alanlar (zero-latency prosody proxies):**
-- `gender`      : "M" ya da "F"  (pitch temelli)
-- `emotion`     : "excited", "neutral", "sad"
-- `arousal`     : 0.0 - 1.0  (energy temelli)
-- `valence`     : -1.0 - 1.0 (pitch+energy)
+**Yeni alanlar (zero-latency rich prosody + speaker-vector):**
+- `gender`           : "M" / "F"  (pitch mean)
+- `emotion`          : "excited", "neutral", "sad", "angry"
+- `arousal`          : 0.0 - 1.0  (energy)
+- `valence`          : -1.0 - 1.0 (pitch+energy)
+- `pitch_mean`       : Hz
+- `pitch_std`        : Hz
+- `energy_mean`      : RMS
+- `energy_std`       : RMS
+- `spectral_centroid`: timbre proxy
+- `zero_crossing_rate`: brightness
+- `speaker_vec`      : 8-D float vector → kümeleme için

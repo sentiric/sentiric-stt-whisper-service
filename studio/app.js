@@ -3,7 +3,7 @@ const $$ = (s) => document.querySelectorAll(s);
 
 // ---------- GLOBAL PERSISTENT SPEAKER RING ----------
 let nextSpeaker   = 0;        // 0=A, 1=B
-const speakerMeta = {};       // spk_0 -> {gender, emotion, color}
+const speakerMeta = {};       // spk_0 -> {gender, emotion, color, vec}
 
 // ---------- AUDIO ENGINE ----------
 const AudioEngine = {
@@ -25,7 +25,6 @@ const AudioEngine = {
         let sum = 0; for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
         const rms = Math.sqrt(sum / input.length);
         if (state.isRecording) state.chunks.push(AudioEngine.floatTo16Bit(input));
-        // hands-free VAD
         const threshold = parseFloat($('#vadRange').value);
         if (state.isHandsFree) {
             if (rms > threshold) { state.silenceStart = null; if (!state.isSpeaking) { state.isSpeaking = true; if (!state.isRecording) ui.toggleRecord(); } }
@@ -104,7 +103,12 @@ const ui = {
             if (idx === 0) startTime = seg.start; bufferText += seg.text;
             if (seg.speaker_turn_next || idx === rawSegments.length - 1) {
                 const spkId = `spk_${nextSpeaker}`;
-                if (!speakerMeta[spkId]) speakerMeta[spkId] = { gender: seg.gender || "?", emotion: seg.emotion || "neutral", color: nextSpeaker === 0 ? "var(--primary)" : "var(--accent-blue)" };
+                if (!speakerMeta[spkId]) {
+                    const gender = seg.gender || "?";
+                    const emotion = seg.emotion || "neutral";
+                    const color = nextSpeaker === 0 ? "var(--primary)" : "var(--accent-blue)";
+                    speakerMeta[spkId] = { gender, emotion, color, vec: seg.speaker_vec || [] };
+                }
                 segmentsToRender.push({ speakerId: nextSpeaker, text: bufferText.trim(), start: startTime, end: seg.end });
                 nextSpeaker = 1 - nextSpeaker; bufferText = ""; if (idx < rawSegments.length - 1) startTime = rawSegments[idx+1].start; }
         });
@@ -112,13 +116,24 @@ const ui = {
         segmentsToRender.forEach(block => {
             const meta = speakerMeta[`spk_${block.speakerId}`];
             const genderIcon = meta.gender === "M" ? "♂" : "♀";
-            const emotionEmoji = { excited: "🔥", neutral: "😐", sad: "😢" }[meta.emotion] || "";
+            const emotionEmoji = { excited: "🔥", neutral: "😐", sad: "😢", angry: "😠" }[meta.emotion] || "";
+            const pitchBar = Math.min(100, Math.max(0, (meta.vec[0] || 0.5) * 100));
+            const energyBar = Math.min(100, Math.max(0, (meta.vec[2] || 0.5) * 100));
             groupDiv.innerHTML += `
                 <div class="speaker-group ${block.speakerId === 0 ? 'main' : 'alt'} timeline-block">
-                    <div class="speaker-avatar" style="border-color:${meta.color};color:${meta.color}">${genderIcon}${emotionEmoji}</div>
+                    <div class="speaker-avatar" style="border-color:${meta.color};color:${meta.color}" title="Pitch:${(meta.vec[0]*300).toFixed(0)} Hz Energy:${(meta.vec[2]*2).toFixed(2)}">
+                        ${genderIcon}${emotionEmoji}
+                    </div>
                     <div class="speaker-content">
-                        <div class="speaker-header"><span class="speaker-name">Konuşmacı ${String.fromCharCode(65 + block.speakerId)}</span><span class="time-tag">${block.start.toFixed(1)}s - ${block.end.toFixed(1)}s</span></div>
+                        <div class="speaker-header">
+                            <span class="speaker-name">Konuşmacı ${String.fromCharCode(65 + block.speakerId)}</span>
+                            <span class="time-tag">${block.start.toFixed(1)}s - ${block.end.toFixed(1)}s</span>
+                        </div>
                         <div class="text-bubble">${block.text}${audioUrl && block === segmentsToRender[segmentsToRender.length-1] ? ui.createPlayerHtml(audioUrl, durationMs) : ''}</div>
+                        <div class="prosody-bars">
+                            <div class="bar-group"><span>Pitch</span><div class="bar-bg"><div class="bar-fill" style="width:${pitchBar}%"></div></div></div>
+                            <div class="bar-group"><span>Energy</span><div class="bar-bg"><div class="bar-fill" style="width:${energyBar}%"></div></div></div>
+                        </div>
                     </div>
                 </div>`;
         });
@@ -160,7 +175,11 @@ const ui = {
     closeSidebars() { $$('.sidebar').forEach(s => s.classList.remove('active')); $('#backdrop').classList.remove('active'); },
     updateStatus(txt) { $('#connStatus span').innerText = txt; },
     clearChat() { $('#transcriptContainer').innerHTML = ''; nextSpeaker = 0; Object.keys(speakerMeta).forEach(k => delete speakerMeta[k]); },
-    exportTranscript(fmt) { const data = { speakers: speakerMeta, segments: Array.from($$('#transcriptContainer .timeline-block')).map(b => ({ text: b.querySelector('.text-bubble').textContent })) }; const blob = new Blob([fmt === 'json' ? JSON.stringify(data, null, 2) : data.segments.map(s => s.text).join('\n')], { type: fmt === 'json' ? 'application/json' : 'text/plain' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `sentiric-transcript.${fmt}`; a.click(); URL.revokeObjectURL(url); }
+    exportTranscript(fmt) {
+        const data = { speakers: speakerMeta, segments: Array.from($$('#transcriptContainer .timeline-block')).map(b => ({ text: b.querySelector('.text-bubble').textContent.trim() })) };
+        const blob = new Blob([fmt === 'json' ? JSON.stringify(data, null, 2) : data.segments.map(s => s.text).join('\n')], { type: fmt === 'json' ? 'application/json' : 'text/plain' });
+        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `sentiric-transcript.${fmt}`; a.click(); URL.revokeObjectURL(url);
+    }
 };
 
 // ---------- STATE ----------

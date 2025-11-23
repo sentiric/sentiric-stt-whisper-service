@@ -29,7 +29,7 @@ void HttpServer::setup_routes() {
     if (!ret) spdlog::warn("⚠️ Could not mount ./studio directory.");
     svr_.Get("/health", [this](const httplib::Request &, httplib::Response &res) {
         bool ready = engine_->is_ready();
-        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.3.0"}, {"api_compatibility", "openai-whisper"} };
+        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.4.0"}, {"api_compatibility", "openai-whisper"} };
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(response.dump(), "application/json"); res.status = ready ? 200 : 503;
     });
@@ -58,10 +58,15 @@ void HttpServer::setup_routes() {
                 std::string safe_text = clean_utf8(r.text); full_text += safe_text; detected_lang = r.language;
                 json words_json = json::array();
                 for (const auto& t : r.tokens) words_json.push_back({ {"word", clean_utf8(t.text)}, {"start", (double)t.t0 / 100.0}, {"end", (double)t.t1 / 100.0}, {"probability", t.p} });
+                const auto& aff = r.affective;
                 segments.push_back({
                     {"text", safe_text}, {"start", (double)r.t0 / 100.0}, {"end", (double)r.t1 / 100.0}, {"probability", r.prob},
-                    {"speaker_turn_next", r.speaker_turn_next}, {"gender", r.gender_proxy}, {"emotion", r.emotion_proxy},
-                    {"arousal", r.arousal}, {"valence", r.valence}, {"words", words_json}
+                    {"speaker_turn_next", r.speaker_turn_next}, {"gender", aff.gender_proxy}, {"emotion", aff.emotion_proxy},
+                    {"arousal", aff.arousal}, {"valence", aff.valence},
+                    {"pitch_mean", aff.pitch_mean}, {"pitch_std", aff.pitch_std},
+                    {"energy_mean", aff.energy_mean}, {"energy_std", aff.energy_std},
+                    {"spectral_centroid", aff.spectral_centroid}, {"zero_crossing_rate", aff.zero_crossing_rate},
+                    {"speaker_vec", aff.speaker_vec}, {"words", words_json}
                 });
             }
             double duration = static_cast<double>(audio.pcm_data.size()) / static_cast<double>(audio.sample_rate);

@@ -33,7 +33,7 @@ services:
       
       # --- Model Yönetimi ---
       - STT_WHISPER_SERVICE_MODEL_DIR=/models
-      - STT_WHISPER_SERVICE_MODEL_FILENAME=ggml-base.bin
+      - STT_WHISPER_SERVICE_MODEL_FILENAME=ggml-medium.bin
       # VAD Modeli (Otomatik indirilir)
       - STT_WHISPER_SERVICE_VAD_MODEL=ggml-silero-vad.bin
       
