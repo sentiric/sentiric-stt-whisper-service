@@ -2,21 +2,19 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
 // =============================================================================
-// 🧠 CORE: SPEAKER IDENTITY MANAGER (CLIENT-SIDE CLUSTERING)
+// 🧠 CORE: SPEAKER IDENTITY MANAGER
 // =============================================================================
 class SpeakerManager {
     constructor(threshold = 0.88) {
         this.threshold = threshold;
-        this.clusters = {}; // { id: { centroid: [], count: int, name: str, color: str, stats: {} } }
+        this.clusters = {}; 
         this.nextId = 0;
-        // Profesyonel Renk Paleti (Data Visualization Friendly)
         this.colors = [
             "#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", 
             "#EC4899", "#06B6D4", "#84CC16", "#F97316", "#6366F1"
         ];
     }
 
-    // Cosine Similarity: İki vektör arasındaki açısal benzerlik
     cosine(vecA, vecB) {
         let dot = 0, normA = 0, normB = 0;
         for (let i = 0; i < vecA.length; i++) {
@@ -28,12 +26,10 @@ class SpeakerManager {
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    // Vektörü bir kümeye ata veya yeni küme oluştur
     assign(vector, meta) {
         let bestId = null;
         let bestScore = -1;
 
-        // Mevcut kümeleri tara
         for (const id in this.clusters) {
             const score = this.cosine(vector, this.clusters[id].centroid);
             if (score > bestScore) {
@@ -42,43 +38,34 @@ class SpeakerManager {
             }
         }
 
-        // Eşik değerini geçtiyse mevcut kümeye dahil et
         if (bestId && bestScore >= this.threshold) {
             this.updateCluster(bestId, vector, meta);
             return this.clusters[bestId];
         }
-
-        // Eşleşme yoksa yeni küme yarat
         return this.createCluster(vector, meta);
     }
 
     createCluster(vector, meta) {
         const id = `spk_${this.nextId++}`;
-        const color = this.colors[this.nextId % this.colors.length]; // Deterministik renk
-        
+        const color = this.colors[this.nextId % this.colors.length];
         this.clusters[id] = {
             id: id,
             centroid: [...vector],
             count: 1,
-            name: `Konuşmacı ${String.fromCharCode(65 + (this.nextId - 1))}`, // A, B, C...
+            name: `Konuşmacı ${String.fromCharCode(65 + (this.nextId - 1))}`,
             color: color,
             gender: meta.gender || "?",
-            lastActive: Date.now()
         };
         return this.clusters[id];
     }
 
     updateCluster(id, vector, meta) {
         const cls = this.clusters[id];
-        // Centroid güncelleme (Running Average)
-        // Yeni vektörün etkisi 1/(count+1) oranındadır.
         const weight = 1.0 / (cls.count + 1);
         for (let i = 0; i < vector.length; i++) {
             cls.centroid[i] = cls.centroid[i] * (1 - weight) + vector[i] * weight;
         }
         cls.count++;
-        cls.lastActive = Date.now();
-        // Cinsiyet bilgisini güncelle (çoğunluk kararı gibi düşünülebilir ama şimdilik son geleni alalım)
         if (meta.gender && meta.gender !== "?") cls.gender = meta.gender;
     }
 
@@ -96,11 +83,10 @@ class SpeakerManager {
     }
 }
 
-// Global Instance
-const speakerMgr = new SpeakerManager(0.85); // Benzerlik eşiği
+const speakerMgr = new SpeakerManager(0.85);
 
 // =============================================================================
-// 🎤 AUDIO ENGINE: VAD & CAPTURE
+// 🎤 AUDIO ENGINE
 // =============================================================================
 const AudioEngine = {
     ctx: null,
@@ -116,8 +102,8 @@ const AudioEngine = {
         const source = this.ctx.createMediaStreamSource(stream);
         
         this.analyser = this.ctx.createAnalyser();
-        this.analyser.fftSize = 256;
-        this.analyser.smoothingTimeConstant = 0.5;
+        this.analyser.fftSize = 512; // Higher resolution for better visualizer
+        this.analyser.smoothingTimeConstant = 0.6;
 
         this.scriptNode = this.ctx.createScriptProcessor(4096, 1, 1);
         
@@ -132,17 +118,16 @@ const AudioEngine = {
     process(e) {
         const input = e.inputBuffer.getChannelData(0);
         
-        // VAD Logic (RMS Calculation)
+        // VAD
         let sum = 0;
         for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
         const rms = Math.sqrt(sum / input.length);
 
-        // Kayıt aktifse buffer'a ekle
         if (this.isRecording) {
             this.chunks.push(this.floatTo16Bit(input));
         }
 
-        // Hands-Free Logic
+        // Hands-Free
         if (state.isHandsFree) {
             const threshold = parseFloat($('#vadRange').value);
             if (rms > threshold) {
@@ -153,7 +138,7 @@ const AudioEngine = {
                 }
             } else if (state.isSpeaking) {
                 const silenceDur = Date.now() - state.lastSpeechTime;
-                if (silenceDur > 1500) { // 1.5s sessizlik
+                if (silenceDur > 1500) { 
                     state.isSpeaking = false;
                     if (this.isRecording) ui.toggleRecord();
                 }
@@ -200,13 +185,12 @@ const AudioEngine = {
 
         const pcm = new Int16Array(buffer, 44);
         pcm.set(result);
-
         return new Blob([buffer], { type: 'audio/wav' });
     }
 };
 
 // =============================================================================
-// 🌐 API CLIENT
+// 🌐 API
 // =============================================================================
 const API = {
     async transcribe(blob, durationMs) {
@@ -234,12 +218,12 @@ const API = {
                 ui.renderResult(data, durationMs, url);
                 ui.updateMetrics(durationMs, processTime, data);
             } else {
-                alert("Hata: " + (data.error || "Sunucu hatası"));
+                console.error(data);
+                // alert("Hata: " + (data.error || "Sunucu hatası"));
             }
         } catch (e) {
             ui.removeElement(tempId);
             console.error(e);
-            alert("Bağlantı Hatası");
         }
     }
 };
@@ -257,26 +241,15 @@ const state = {
 
 const ui = {
     init() {
-        // Event Listeners
-        $('#menuToggle').onclick = () => this.toggleSidebar('left');
-        $('#telemetryToggle').onclick = () => this.toggleSidebar('right');
-        $$('.close-sidebar').forEach(b => b.onclick = () => this.closeSidebars());
-        $('#backdrop').onclick = () => this.closeSidebars();
-        
         $('#recordBtn').onclick = () => this.toggleRecord();
         $('#handsFreeToggleBtn').onclick = () => this.toggleHandsFree();
+        $('#fileInput').onchange = (e) => { if(e.target.files[0]) API.transcribe(e.target.files[0], 0); };
         
-        // Sliders
+        // Sliders updates
         $('#tempRange').oninput = (e) => $('#tempVal').innerText = e.target.value;
         $('#beamRange').oninput = (e) => $('#beamVal').innerText = e.target.value;
         $('#vadRange').oninput = (e) => $('#vadVal').innerText = e.target.value;
 
-        // File Upload
-        $('#fileInput').onchange = (e) => { 
-            if(e.target.files[0]) API.transcribe(e.target.files[0], 0); 
-        };
-
-        // Shortcut
         document.addEventListener('keydown', (e) => { 
             if (e.code === 'Space' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') { 
                 e.preventDefault(); 
@@ -289,13 +262,12 @@ const ui = {
         if (!AudioEngine.ctx) AudioEngine.init();
 
         if (AudioEngine.isRecording) {
-            // Stop Recording
             AudioEngine.isRecording = false;
             clearInterval(state.timer);
             $('#recordBtn').classList.remove('recording');
             
             const duration = Date.now() - state.startTime;
-            if (duration > 500) { // En az 0.5sn kayıt
+            if (duration > 500) {
                 const blob = AudioEngine.createWavBlob();
                 API.transcribe(blob, duration);
             }
@@ -303,7 +275,6 @@ const ui = {
             $('#recordTimer').innerText = "00:00";
             $('#recordTimer').style.opacity = "0";
         } else {
-            // Start Recording
             AudioEngine.chunks = [];
             AudioEngine.isRecording = true;
             state.startTime = Date.now();
@@ -327,78 +298,64 @@ const ui = {
 
     renderResult(data, durationMs, audioUrl) {
         const container = $('#transcriptContainer');
-        $('.empty-placeholder')?.remove();
+        $('.empty-state')?.remove();
 
-        // Segmentleri hazırla (Tek parça metin gelirse onu dizi yap)
         const segments = (data.segments && data.segments.length > 0) 
             ? data.segments 
             : [{ text: data.text, start: 0, end: durationMs/1000, speaker_vec: Array(8).fill(0), gender: '?' }];
 
-        // Kümeleme ve Render Döngüsü
         segments.forEach((seg, idx) => {
-            // 1. Identify Speaker
-            // Backend'den gelen speaker_vec boşsa veya hatalıysa fallback kullan
             const vec = (seg.speaker_vec && seg.speaker_vec.length === 8) ? seg.speaker_vec : Array(8).fill(0);
             const speaker = speakerMgr.assign(vec, { gender: seg.gender });
             
-            // 2. HTML Construction
             const div = document.createElement('div');
-            div.className = `speaker-group timeline-block`;
-            // Kendi ID'mize göre (solda veya sağda göstermek için değil, renk için)
-            div.style.setProperty('--spk-color', speaker.color);
-
-            // Duygu Emoji Haritası
+            div.className = `timeline-block`;
+            
             const emotionMap = { excited: "🔥", neutral: "", sad: "😢", angry: "😠" };
             const emotionIcon = emotionMap[seg.emotion] || "";
             const genderIcon = speaker.gender === "F" ? "👩" : "👨";
 
-            // Prosody Barları
-            const pitchPct = Math.min(100, (vec[0] || 0) * 100); // Pitch Mean Normalized
-            const energyPct = Math.min(100, (vec[2] || 0) * 100); // Energy Mean
+            const pitchPct = Math.min(100, (vec[0] || 0) * 100); 
+            const energyPct = Math.min(100, (vec[2] || 0) * 100); 
 
             div.innerHTML = `
-                <div class="speaker-avatar" style="border-color: ${speaker.color}; color: ${speaker.color}; background: ${speaker.color}15" 
-                     onclick="ui.promptRename('${speaker.id}')" title="İsim Değiştir">
-                    <div class="avatar-icon">${genderIcon}</div>
-                    <div class="emotion-icon">${emotionIcon}</div>
+                <div class="speaker-avatar" style="border-color: ${speaker.color}; color: ${speaker.color}" 
+                     onclick="ui.promptRename('${speaker.id}')" title="Yeniden Adlandır">
+                    <div>${genderIcon}</div>
+                    <div class="emotion-badge">${emotionIcon}</div>
                 </div>
                 <div class="speaker-content">
-                    <div class="speaker-header">
+                    <div class="speaker-meta">
                         <span class="speaker-name" id="name-${speaker.id}" style="color: ${speaker.color}">${speaker.name}</span>
-                        <span class="time-tag">${seg.start.toFixed(1)}s</span>
+                        <span class="time-stamp">${seg.start.toFixed(1)}s</span>
                     </div>
-                    <div class="text-bubble" style="border-left-color: ${speaker.color}">
+                    <div class="bubble" style="border-left-color: ${speaker.color}">
                         ${seg.text}
                         ${audioUrl && idx === segments.length-1 ? ui.createPlayerHtml(audioUrl, durationMs) : ''}
                     </div>
-                    <div class="prosody-info">
-                        <div class="p-bar" title="Pitch / Ton"><i class="fas fa-music"></i> <div class="bar-bg"><div class="bar-fill" style="width:${pitchPct}%"></div></div></div>
-                        <div class="p-bar" title="Energy / Ses"><i class="fas fa-bolt"></i> <div class="bar-bg"><div class="bar-fill" style="width:${energyPct}%"></div></div></div>
+                    <div class="prosody-strip">
+                        <div class="p-meter" title="Pitch"><i class="fas fa-music"></i> <div class="p-track"><div class="p-fill" style="width:${pitchPct}%; background:${speaker.color}"></div></div></div>
+                        <div class="p-meter" title="Energy"><i class="fas fa-bolt"></i> <div class="p-track"><div class="p-fill" style="width:${energyPct}%; background:${speaker.color}"></div></div></div>
                     </div>
                 </div>
             `;
-            
             container.appendChild(div);
         });
 
         container.scrollTop = container.scrollHeight;
-        
-        // Hafızaya al (isim değiştirince yeniden çizmek için gerekebilir, şimdilik basit tutuyoruz)
-        window.lastRenderData = { data, durationMs, audioUrl };
     },
 
     createPlayerHtml(url, durMs) {
         const sec = (durMs/1000).toFixed(1);
-        // Random waveform görseli
         let bars = '';
-        for(let i=0; i<12; i++) {
+        for(let i=0; i<16; i++) {
             const h = Math.floor(Math.random() * 12) + 4;
-            bars += `<div class="wf-bar" style="height:${h}px"></div>`;
+            bars += `<div class="wave-bar" style="height:${h}px"></div>`;
         }
         return `
-            <div class="inline-player" onclick="ui.playAudio(this, '${url}')">
-                <button class="play-icon"><i class="fas fa-play"></i></button>
-                <div class="waveform">${bars}</div>
+            <div class="audio-player" onclick="ui.playAudio(this, '${url}')">
+                <div class="play-icon"><i class="fas fa-play"></i></div>
+                <div class="wave-visual">${bars}</div>
                 <span class="duration">${sec}s</span>
             </div>
         `;
@@ -409,7 +366,6 @@ const ui = {
             window.currentAudio.pause();
             if (window.currentBtn) window.currentBtn.className = "fas fa-play";
         }
-        
         const icon = el.querySelector('i');
         if (icon.classList.contains('fa-pause')) return;
 
@@ -425,10 +381,9 @@ const ui = {
     promptRename(id) {
         const cls = speakerMgr.clusters[id];
         if (!cls) return;
-        const newName = prompt(`"${cls.name}" için yeni isim:`, cls.name);
+        const newName = prompt(`İsim verin:`, cls.name);
         if (newName && newName.trim()) {
             speakerMgr.rename(id, newName.trim());
-            // UI'daki tüm etiketleri güncelle
             $$(`#name-${id}`).forEach(el => el.innerText = newName.trim());
         }
     },
@@ -438,11 +393,14 @@ const ui = {
         const id = 'temp-' + Date.now();
         const div = document.createElement('div');
         div.id = id;
-        div.className = 'speaker-group timeline-block temp';
+        div.className = 'timeline-block';
+        div.style.opacity = '0.5';
         div.innerHTML = `
-            <div class="speaker-avatar skeleton"></div>
+            <div class="speaker-avatar" style="border-style: dashed; border-color: #555;">
+                <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
             <div class="speaker-content">
-                <div class="text-bubble skeleton-text">Processing...</div>
+                <div class="bubble">Analiz ediliyor...</div>
             </div>
         `;
         container.appendChild(div);
@@ -461,23 +419,32 @@ const ui = {
         
         $('#langVal').innerText = (data.language || '?').toUpperCase();
         
-        // Confidence Avg
         let avgProb = 0;
         if (data.segments && data.segments.length > 0) {
             avgProb = data.segments.reduce((acc, s) => acc + s.probability, 0) / data.segments.length;
         }
         $('#confVal').innerText = `%${(avgProb * 100).toFixed(1)}`;
         
+        // Pretty JSON
         $('#jsonLog').innerText = JSON.stringify(data, null, 2);
     },
 
-    toggleDebugJson() { $('#jsonLog').classList.toggle('hidden'); },
+    copyJson() {
+        const text = $('#jsonLog').innerText;
+        navigator.clipboard.writeText(text);
+    },
 
     startVisualizer() {
         const canvas = $('#visualizerCanvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = canvas.offsetWidth;
-        canvas.height = canvas.offsetHeight;
+        
+        // Dynamic Resize
+        const resize = () => {
+            canvas.width = canvas.parentElement.offsetWidth;
+            canvas.height = canvas.parentElement.offsetHeight;
+        };
+        window.addEventListener('resize', resize);
+        resize();
 
         const bufferLength = AudioEngine.analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
@@ -487,38 +454,35 @@ const ui = {
             AudioEngine.analyser.getByteFrequencyData(dataArray);
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            const barWidth = (canvas.width / bufferLength) * 2.5;
-            let barHeight;
-            let x = 0;
-
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            
+            // Mirror Effect for cool wave
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.4)';
+            const barWidth = (canvas.width / bufferLength) * 2;
+            
             for (let i = 0; i < bufferLength; i++) {
-                barHeight = (dataArray[i] / 255) * canvas.height;
-                ctx.fillStyle = `rgba(59, 130, 246, ${dataArray[i] / 300})`; // Blue tint
-                ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-                x += barWidth + 1;
+                const h = (dataArray[i] / 255) * canvas.height * 0.8;
+                // Right side
+                ctx.fillRect(centerX + (i * barWidth), centerY - h/2, barWidth - 1, h);
+                // Left side
+                ctx.fillRect(centerX - (i * barWidth), centerY - h/2, barWidth - 1, h);
             }
         };
         draw();
     },
 
-    toggleSidebar(side) { 
-        const el = side === 'left' ? $('#leftSidebar') : $('#rightSidebar');
-        el.classList.add('active');
-        $('#backdrop').classList.add('active');
-    },
-    closeSidebars() { 
-        $$('.sidebar').forEach(s => s.classList.remove('active'));
-        $('#backdrop').classList.remove('active');
-    },
     clearChat() {
-        $('#transcriptContainer').innerHTML = '';
+        $('#transcriptContainer').innerHTML = '<div class="empty-state"><div class="icon-box"><i class="fas fa-microphone-alt"></i></div><h3>Kayda Hazır</h3><p>Temizlendi.</p></div>';
         speakerMgr.reset();
     },
+
     exportTranscript(type) {
         const lines = [];
-        $$('.speaker-group:not(.temp)').forEach(grp => {
+        $$('.timeline-block').forEach(grp => {
+            if (grp.style.opacity === '0.5') return;
             const name = grp.querySelector('.speaker-name').innerText;
-            const text = grp.querySelector('.text-bubble').innerText.replace(/\n/g, ' ');
+            const text = grp.querySelector('.bubble').innerText.replace(/\n/g, ' ');
             lines.push(type === 'json' ? {speaker: name, text} : `[${name}]: ${text}`);
         });
         
@@ -527,10 +491,9 @@ const ui = {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `transcript.${type}`;
+        a.download = `sentiric-transcript.${type}`;
         a.click();
     }
 };
 
-// Start
 ui.init();
