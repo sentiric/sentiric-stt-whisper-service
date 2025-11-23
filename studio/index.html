@@ -2,29 +2,40 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sentiric Omni-Studio Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#09090b">
+    <title>Sentiric Omni-Studio</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>">
     
-    <!-- Fonts & Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body data-theme="dark">
 
+<!-- Mobil Header (Sadece mobilde görünür) -->
+<header class="mobile-header">
+    <button class="icon-btn" id="mobileMenuBtn"><i class="fas fa-bars"></i></button>
+    <div class="mobile-brand">SENTIRIC <span class="badge">PRO</span></div>
+    <button class="icon-btn" id="mobileMetricsBtn"><i class="fas fa-chart-pie"></i></button>
+</header>
+
+<!-- Backdrop Overlay -->
+<div class="backdrop" id="backdrop"></div>
+
 <div class="app-container">
     
-    <!-- LEFT SIDEBAR: SETTINGS -->
-    <aside class="sidebar left-sidebar">
+    <!-- LEFT SIDEBAR: CONTROL -->
+    <aside class="sidebar left-sidebar" id="leftSidebar">
         <div class="sidebar-header">
             <div class="logo">
                 <div class="logo-icon"><i class="fas fa-wave-square"></i></div>
                 <div class="logo-text">
                     <h1>SENTIRIC</h1>
-                    <span class="badge">PRO</span>
+                    <span class="badge">v3.0</span>
                 </div>
             </div>
+            <button class="close-sidebar-btn" id="closeLeftSidebar"><i class="fas fa-times"></i></button>
         </div>
 
         <div class="sidebar-content">
@@ -37,11 +48,12 @@
                         <option value="auto">✨ Otomatik Algıla</option>
                         <option value="tr">🇹🇷 Türkçe</option>
                         <option value="en">🇺🇸 English</option>
+                        <option value="de">🇩🇪 Deutsch</option>
                     </select>
                 </div>
                 <div class="input-wrapper">
                     <i class="fas fa-magic"></i>
-                    <textarea id="promptInput" placeholder="Prompt / Bağlam (Örn: Tıbbi terimler, özel isimler...)"></textarea>
+                    <textarea id="promptInput" placeholder="Prompt (Örn: Sektörel terimler, kişi adları...)"></textarea>
                 </div>
             </div>
 
@@ -60,8 +72,8 @@
                 </div>
                 <div class="toggle-item">
                     <div class="toggle-text">
-                        <span>Speaker Diarization</span>
-                        <small>Konuşmacı Ayrımı (A/B)</small>
+                        <span>Konuşmacı Ayrımı</span>
+                        <small>Diarization (A/B)</small>
                     </div>
                     <label class="switch">
                         <input type="checkbox" id="diarizationToggle" checked>
@@ -72,7 +84,7 @@
 
             <!-- Advanced Engine -->
             <div class="setting-group">
-                <label>MOTOR AYARLARI</label>
+                <label>MOTOR & KİŞİLİK</label>
                 <div class="slider-item">
                     <div class="slider-header">
                         <span>Yaratıcılık (Temp)</span>
@@ -82,14 +94,14 @@
                 </div>
                 <div class="slider-item">
                     <div class="slider-header">
-                        <span>Kalite (Beam)</span>
-                        <span id="beamVal" class="val">5</span>
+                        <span>Cluster Hassasiyeti</span>
+                        <span id="clusterVal" class="val">0.85</span>
                     </div>
-                    <input type="range" id="beamRange" min="1" max="10" step="1" value="5">
+                    <input type="range" id="clusterThreshold" min="0.70" max="0.99" step="0.01" value="0.85">
                 </div>
                 <div class="slider-item">
                     <div class="slider-header">
-                        <span>VAD Eşiği</span>
+                        <span>VAD Eşiği (Sessizlik)</span>
                         <span id="vadVal" class="val">0.02</span>
                     </div>
                     <input type="range" id="vadRange" min="0.001" max="0.1" step="0.001" value="0.02">
@@ -99,110 +111,105 @@
 
         <div class="sidebar-footer">
             <div class="status-badge" id="connStatus">
-                <span class="dot"></span> Sistem Hazır
+                <span class="dot"></span> Bağlı
             </div>
         </div>
     </aside>
 
     <!-- MAIN STAGE -->
     <main class="stage">
-        <!-- Top Toolbar -->
-        <header class="stage-header">
+        <!-- Desktop Toolbar (Hidden on Mobile) -->
+        <header class="stage-header desktop-only">
             <div class="header-left">
-                <h2><i class="fas fa-align-left"></i> Canlı Transkripsiyon</h2>
+                <h2><i class="fas fa-stream"></i> Canlı Akış</h2>
             </div>
             <div class="header-right">
-                <button class="btn btn-sm btn-ghost" onclick="ui.exportTranscript('json')" title="JSON İndir"><i class="fas fa-file-code"></i> JSON</button>
-                <button class="btn btn-sm btn-ghost" onclick="ui.exportTranscript('txt')" title="TXT İndir"><i class="fas fa-file-alt"></i> TXT</button>
+                <button class="btn btn-sm btn-ghost" onclick="ui.exportTranscript('json')">JSON</button>
+                <button class="btn btn-sm btn-ghost" onclick="ui.exportTranscript('txt')">TXT</button>
                 <div class="divider"></div>
-                <button class="btn btn-sm btn-danger-ghost" onclick="ui.clearChat()" title="Temizle"><i class="fas fa-trash-alt"></i></button>
+                <button class="btn btn-sm btn-danger-ghost" onclick="ui.clearChat()"><i class="fas fa-trash-alt"></i></button>
             </div>
         </header>
 
         <!-- Transcript Area -->
         <div id="transcriptContainer" class="transcript-content">
-            <!-- Empty State -->
             <div class="empty-state">
-                <div class="icon-box"><i class="fas fa-microphone-alt"></i></div>
+                <div class="icon-box"><i class="fas fa-microphone-lines"></i></div>
                 <h3>Kayda Hazır</h3>
-                <p>Yapay zeka destekli konuşmacı ayrıştırma ve duygu analizi.</p>
-                <div class="kbd-hint"><kbd>Space</kbd> tuşuna basarak başlatın</div>
+                <p>Yapay zeka konuşmacıları ve duyguları anlık olarak analiz eder.</p>
+                <div class="kbd-hint desktop-only"><kbd>Space</kbd> Kayıt Başlat/Durdur</div>
             </div>
         </div>
 
-        <!-- Floating Control Dock -->
+        <!-- Floating Dock -->
         <div class="dock-wrapper">
             <div class="dock-container">
-                <!-- Visualizer Background -->
                 <canvas id="visualizerCanvas"></canvas>
-
-                <!-- Controls -->
                 <div class="dock-controls">
-                    <!-- Upload -->
-                    <input type="file" id="fileInput" hidden accept="audio/*">
-                    <button class="dock-btn secondary" onclick="$('#fileInput').click()" title="Dosya Yükle">
-                        <i class="fas fa-folder-open"></i>
-                    </button>
+                    <!-- Tools -->
+                    <div class="dock-side-tools">
+                         <input type="file" id="fileInput" hidden accept="audio/*">
+                         <button class="dock-btn secondary" onclick="$('#fileInput').click()" title="Yükle"><i class="fas fa-upload"></i></button>
+                         <button class="dock-btn secondary mobile-only" onclick="ui.clearChat()"><i class="fas fa-trash"></i></button>
+                    </div>
 
-                    <!-- Record (Center) -->
+                    <!-- Main Record -->
                     <div class="record-group">
-                        <button id="recordBtn" class="record-btn">
-                            <i class="fas fa-microphone"></i>
-                        </button>
+                        <button id="recordBtn" class="record-btn"><i class="fas fa-microphone"></i></button>
                         <div id="recordTimer" class="timer">00:00</div>
                     </div>
 
-                    <!-- Hands Free -->
-                    <button class="dock-btn secondary" id="handsFreeToggleBtn" title="Otomatik VAD Modu">
-                        <i class="fas fa-robot"></i>
-                        <div class="active-dot"></div>
-                    </button>
+                    <!-- Mode -->
+                    <div class="dock-side-tools">
+                        <button class="dock-btn secondary" id="handsFreeToggleBtn" title="VAD Modu">
+                            <i class="fas fa-robot"></i>
+                            <div class="active-dot"></div>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
     </main>
 
     <!-- RIGHT SIDEBAR: METRICS -->
-    <aside class="sidebar right-sidebar">
+    <aside class="sidebar right-sidebar" id="rightSidebar">
         <div class="sidebar-header">
             <h3>Analiz Özeti</h3>
+            <button class="close-sidebar-btn" id="closeRightSidebar"><i class="fas fa-times"></i></button>
         </div>
         
         <div class="sidebar-content">
-            <!-- Main Metric -->
             <div class="metric-card main-card">
                 <div class="metric-label">PERFORMANS (RTF)</div>
                 <div class="metric-value huge" id="rtfVal">0.0x</div>
-                <div class="metric-sub">Real-Time Factor</div>
+                <div class="metric-sub">Gerçek Zaman Çarpanı</div>
             </div>
 
-            <!-- Grid Metrics -->
             <div class="metrics-grid">
                 <div class="metric-card">
                     <div class="metric-label">SES SÜRESİ</div>
-                    <div class="metric-value" id="durVal">0.00s</div>
+                    <div class="metric-value" id="durVal">0s</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">İŞLEM SÜRESİ</div>
-                    <div class="metric-value" id="procVal">0.00s</div>
+                    <div class="metric-value" id="procVal">0ms</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">GÜVEN SKORU</div>
-                    <div class="metric-value" id="confVal">%0</div>
+                    <div class="metric-label">GÜVEN</div>
+                    <div class="metric-value" id="confVal">--</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">ALGILANAN DİL</div>
+                    <div class="metric-label">DİL</div>
                     <div class="metric-value" id="langVal">--</div>
                 </div>
             </div>
 
-            <!-- JSON Output -->
             <div class="json-viewer-container">
                 <div class="json-header">
-                    <span>HAM VERİ</span>
+                    <span>CANLI VERİ ÇIKIŞI</span>
                     <button class="btn-xs" onclick="ui.copyJson()"><i class="far fa-copy"></i></button>
                 </div>
-                <pre id="jsonLog" class="json-content">Waiting for data...</pre>
+                <pre id="jsonLog" class="json-content">Waiting...</pre>
             </div>
         </div>
     </aside>
