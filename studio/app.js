@@ -1,261 +1,536 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
-// ---------- Speaker Cluster (zero-latency, browser-side) ----------
-class SpeakerClusterer {
-  constructor(threshold = 0.82) {
-    this.threshold = threshold;
-    this.clusters = {}; // { spk_0: { centroid: [], count: 0 }, ... }
-    this.nextId = 0;
-  }
+// =============================================================================
+// 🧠 CORE: SPEAKER IDENTITY MANAGER (CLIENT-SIDE CLUSTERING)
+// =============================================================================
+class SpeakerManager {
+    constructor(threshold = 0.88) {
+        this.threshold = threshold;
+        this.clusters = {}; // { id: { centroid: [], count: int, name: str, color: str, stats: {} } }
+        this.nextId = 0;
+        // Profesyonel Renk Paleti (Data Visualization Friendly)
+        this.colors = [
+            "#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", 
+            "#EC4899", "#06B6D4", "#84CC16", "#F97316", "#6366F1"
+        ];
+    }
 
-  cosine(a, b) {
-    let dot = 0, normA = 0, normB = 0;
-    for (let i = 0; i < a.length; i++) {
-      dot += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
+    // Cosine Similarity: İki vektör arasındaki açısal benzerlik
+    cosine(vecA, vecB) {
+        let dot = 0, normA = 0, normB = 0;
+        for (let i = 0; i < vecA.length; i++) {
+            dot += vecA[i] * vecB[i];
+            normA += vecA[i] * vecA[i];
+            normB += vecB[i] * vecB[i];
+        }
+        if (normA === 0 || normB === 0) return 0;
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
-    if (normA === 0 || normB === 0) return 0;
-    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-  }
 
-  assignOrAdd(vec) {
-    let bestId = '';
-    let bestSim = 0;
-    for (const [id, cls] of Object.entries(this.clusters)) {
-      const sim = this.cosine(vec, cls.centroid);
-      if (sim > bestSim) { bestSim = sim; bestId = id; }
+    // Vektörü bir kümeye ata veya yeni küme oluştur
+    assign(vector, meta) {
+        let bestId = null;
+        let bestScore = -1;
+
+        // Mevcut kümeleri tara
+        for (const id in this.clusters) {
+            const score = this.cosine(vector, this.clusters[id].centroid);
+            if (score > bestScore) {
+                bestScore = score;
+                bestId = id;
+            }
+        }
+
+        // Eşik değerini geçtiyse mevcut kümeye dahil et
+        if (bestId && bestScore >= this.threshold) {
+            this.updateCluster(bestId, vector, meta);
+            return this.clusters[bestId];
+        }
+
+        // Eşleşme yoksa yeni küme yarat
+        return this.createCluster(vector, meta);
     }
-    if (bestId && bestSim >= this.threshold) {
-      // update centroid (running mean)
-      const cls = this.clusters[bestId];
-      for (let i = 0; i < cls.centroid.length; i++) {
-        cls.centroid[i] = (cls.centroid[i] * cls.count + vec[i]) / (cls.count + 1);
-      }
-      cls.count++;
-      return bestId;
+
+    createCluster(vector, meta) {
+        const id = `spk_${this.nextId++}`;
+        const color = this.colors[this.nextId % this.colors.length]; // Deterministik renk
+        
+        this.clusters[id] = {
+            id: id,
+            centroid: [...vector],
+            count: 1,
+            name: `Konuşmacı ${String.fromCharCode(65 + (this.nextId - 1))}`, // A, B, C...
+            color: color,
+            gender: meta.gender || "?",
+            lastActive: Date.now()
+        };
+        return this.clusters[id];
     }
-    // new cluster
-    const newId = `spk_${this.nextId++}`;
-    this.clusters[newId] = { centroid: [...vec], count: 1 };
-    return newId;
-  }
+
+    updateCluster(id, vector, meta) {
+        const cls = this.clusters[id];
+        // Centroid güncelleme (Running Average)
+        // Yeni vektörün etkisi 1/(count+1) oranındadır.
+        const weight = 1.0 / (cls.count + 1);
+        for (let i = 0; i < vector.length; i++) {
+            cls.centroid[i] = cls.centroid[i] * (1 - weight) + vector[i] * weight;
+        }
+        cls.count++;
+        cls.lastActive = Date.now();
+        // Cinsiyet bilgisini güncelle (çoğunluk kararı gibi düşünülebilir ama şimdilik son geleni alalım)
+        if (meta.gender && meta.gender !== "?") cls.gender = meta.gender;
+    }
+
+    rename(id, newName) {
+        if (this.clusters[id]) {
+            this.clusters[id].name = newName;
+            return true;
+        }
+        return false;
+    }
+
+    reset() {
+        this.clusters = {};
+        this.nextId = 0;
+    }
 }
 
-// ---------- SPEAKER CLUSTER ----------
-const clusterer = new SpeakerClusterer(0.82); // threshold
-const speakerColors = [  // 12 adet farklı renk
-    "#00e599", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#10b981",
-    "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#6366f1", "#14b8a6"
-];
-let speakerNames = {}; // spk_0 -> "Zeynep"
+// Global Instance
+const speakerMgr = new SpeakerManager(0.85); // Benzerlik eşiği
 
-// ---------- GLOBAL PERSISTENT SPEAKER RING ----------
-let nextSpeaker   = 0;        // 0=A, 1=B
-const speakerMeta = {};       // spk_0 -> {gender, emotion, color, vec}
-
-// ---------- AUDIO ENGINE ----------
+// =============================================================================
+// 🎤 AUDIO ENGINE: VAD & CAPTURE
+// =============================================================================
 const AudioEngine = {
+    ctx: null,
+    analyser: null,
+    scriptNode: null,
+    chunks: [],
+    isRecording: false,
+    
     async init() {
-        if (state.audioContext) return;
-        try {
-            state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const source = state.audioContext.createMediaStreamSource(stream);
-            state.analyser = state.audioContext.createAnalyser(); state.analyser.fftSize = 128;
-            const processor = state.audioContext.createScriptProcessor(4096, 1, 1);
-            source.connect(state.analyser); state.analyser.connect(processor); processor.connect(state.audioContext.destination);
-            processor.onaudioprocess = (e) => AudioEngine.process(e);
-            ui.startVisualizer(); ui.updateStatus("Hazır");
-        } catch (e) { console.error(e); alert("Mikrofon hatası! Lütfen izinleri kontrol edin."); }
+        if (this.ctx) return;
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const source = this.ctx.createMediaStreamSource(stream);
+        
+        this.analyser = this.ctx.createAnalyser();
+        this.analyser.fftSize = 256;
+        this.analyser.smoothingTimeConstant = 0.5;
+
+        this.scriptNode = this.ctx.createScriptProcessor(4096, 1, 1);
+        
+        source.connect(this.analyser);
+        this.analyser.connect(this.scriptNode);
+        this.scriptNode.connect(this.ctx.destination);
+
+        this.scriptNode.onaudioprocess = (e) => this.process(e);
+        ui.startVisualizer();
     },
+
     process(e) {
         const input = e.inputBuffer.getChannelData(0);
-        let sum = 0; for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+        
+        // VAD Logic (RMS Calculation)
+        let sum = 0;
+        for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
         const rms = Math.sqrt(sum / input.length);
-        if (state.isRecording) state.chunks.push(AudioEngine.floatTo16Bit(input));
-        const threshold = parseFloat($('#vadRange').value);
+
+        // Kayıt aktifse buffer'a ekle
+        if (this.isRecording) {
+            this.chunks.push(this.floatTo16Bit(input));
+        }
+
+        // Hands-Free Logic
         if (state.isHandsFree) {
-            if (rms > threshold) { state.silenceStart = null; if (!state.isSpeaking) { state.isSpeaking = true; if (!state.isRecording) ui.toggleRecord(); } }
-            else if (state.isSpeaking) {
-                if (!state.silenceStart) state.silenceStart = Date.now();
-                else if (Date.now() - state.silenceStart > state.silenceDuration) { state.isSpeaking = false; if (state.isRecording) ui.toggleRecord(); }
+            const threshold = parseFloat($('#vadRange').value);
+            if (rms > threshold) {
+                state.lastSpeechTime = Date.now();
+                if (!state.isSpeaking) {
+                    state.isSpeaking = true;
+                    if (!this.isRecording) ui.toggleRecord();
+                }
+            } else if (state.isSpeaking) {
+                const silenceDur = Date.now() - state.lastSpeechTime;
+                if (silenceDur > 1500) { // 1.5s sessizlik
+                    state.isSpeaking = false;
+                    if (this.isRecording) ui.toggleRecord();
+                }
             }
         }
     },
-    floatTo16Bit(input) { const output = new Int16Array(input.length); for (let i = 0; i < input.length; i++) { let s = Math.max(-1, Math.min(1, input[i])); output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; } return output; },
+
+    floatTo16Bit(input) {
+        const output = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+            let s = Math.max(-1, Math.min(1, input[i]));
+            output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        return output;
+    },
+
     createWavBlob() {
-        const totalLen = state.chunks.reduce((acc, c) => acc + c.length, 0);
-        const result = new Int16Array(totalLen); let offset = 0; for (const c of state.chunks) { result.set(c, offset); offset += c.length; }
-        const buffer = new ArrayBuffer(44 + result.length * 2); const view = new DataView(buffer);
+        const totalLen = this.chunks.reduce((acc, c) => acc + c.length, 0);
+        const result = new Int16Array(totalLen);
+        let offset = 0;
+        for (const c of this.chunks) {
+            result.set(c, offset);
+            offset += c.length;
+        }
+        
+        const buffer = new ArrayBuffer(44 + result.length * 2);
+        const view = new DataView(buffer);
         const writeString = (v, o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
-        const rate = state.audioContext.sampleRate;
-        writeString(view, 0, 'RIFF'); view.setUint32(4, 36 + result.length * 2, true); writeString(view, 8, 'WAVE');
-        writeString(view, 12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-        view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-        writeString(view, 36, 'data'); view.setUint32(40, result.length * 2, true);
-        const pcm = new Int16Array(buffer, 44); pcm.set(result);
+        const rate = this.ctx.sampleRate;
+
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + result.length * 2, true);
+        writeString(view, 8, 'WAVE');
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, 1, true);
+        view.setUint32(24, rate, true);
+        view.setUint32(28, rate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        writeString(view, 36, 'data');
+        view.setUint32(40, result.length * 2, true);
+
+        const pcm = new Int16Array(buffer, 44);
+        pcm.set(result);
+
         return new Blob([buffer], { type: 'audio/wav' });
     }
 };
 
-// ---------- API ----------
+// =============================================================================
+// 🌐 API CLIENT
+// =============================================================================
 const API = {
     async transcribe(blob, durationMs) {
         const fd = new FormData();
         fd.append('file', blob);
         fd.append('language', $('#langSelect').value);
-        if ($('#promptInput').value) fd.append('prompt', $('#promptInput').value);
+        fd.append('prompt', $('#promptInput').value);
         fd.append('translate', $('#translateToggle').checked);
         fd.append('diarization', $('#diarizationToggle').checked);
         fd.append('temperature', $('#tempRange').value);
         fd.append('beam_size', $('#beamRange').value);
+
         const tempId = ui.addTempMessage();
+        
         try {
             const t0 = Date.now();
             const res = await fetch('/v1/transcribe', { method: 'POST', body: fd });
-            const data = await res.json(); const processTime = Date.now() - t0;
+            const data = await res.json();
+            const processTime = Date.now() - t0;
+
             ui.removeElement(tempId);
-            if (res.ok) { const url = URL.createObjectURL(blob); ui.renderResult(data, durationMs, url); ui.updateMetrics(durationMs, processTime, data); }
-            else alert("Hata: " + (data.error || "Sunucu hatası"));
-        } catch (e) { ui.removeElement(tempId); alert("Ağ Hatası"); }
+
+            if (res.ok) {
+                const url = URL.createObjectURL(blob);
+                ui.renderResult(data, durationMs, url);
+                ui.updateMetrics(durationMs, processTime, data);
+            } else {
+                alert("Hata: " + (data.error || "Sunucu hatası"));
+            }
+        } catch (e) {
+            ui.removeElement(tempId);
+            console.error(e);
+            alert("Bağlantı Hatası");
+        }
     }
 };
 
-// ---------- UI ----------
+// =============================================================================
+// 🎨 UI CONTROLLER
+// =============================================================================
+const state = {
+    isHandsFree: false,
+    lastSpeechTime: 0,
+    isSpeaking: false,
+    startTime: 0,
+    timer: null
+};
+
 const ui = {
     init() {
-        $('#menuToggle').onclick = () => ui.toggleSidebar('left');
-        $('#telemetryToggle').onclick = () => ui.toggleSidebar('right');
-        $$('.close-sidebar').forEach(b => b.onclick = () => ui.closeSidebars());
-        $('#backdrop').onclick = () => ui.closeSidebars();
-        $('#recordBtn').onclick = () => ui.toggleRecord();
-        $('#handsFreeToggleBtn').onclick = () => { state.isHandsFree = !state.isHandsFree; $('#handsFreeToggleBtn').classList.toggle('active'); };
+        // Event Listeners
+        $('#menuToggle').onclick = () => this.toggleSidebar('left');
+        $('#telemetryToggle').onclick = () => this.toggleSidebar('right');
+        $$('.close-sidebar').forEach(b => b.onclick = () => this.closeSidebars());
+        $('#backdrop').onclick = () => this.closeSidebars();
+        
+        $('#recordBtn').onclick = () => this.toggleRecord();
+        $('#handsFreeToggleBtn').onclick = () => this.toggleHandsFree();
+        
+        // Sliders
         $('#tempRange').oninput = (e) => $('#tempVal').innerText = e.target.value;
         $('#beamRange').oninput = (e) => $('#beamVal').innerText = e.target.value;
         $('#vadRange').oninput = (e) => $('#vadVal').innerText = e.target.value;
-        $('#fileInput').onchange = (e) => { if(e.target.files[0]) API.transcribe(e.target.files[0], 0); };
-        document.addEventListener('keydown', (e) => { if (e.code === 'Space' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') { e.preventDefault(); ui.toggleRecord(); } });
+
+        // File Upload
+        $('#fileInput').onchange = (e) => { 
+            if(e.target.files[0]) API.transcribe(e.target.files[0], 0); 
+        };
+
+        // Shortcut
+        document.addEventListener('keydown', (e) => { 
+            if (e.code === 'Space' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') { 
+                e.preventDefault(); 
+                this.toggleRecord(); 
+            } 
+        });
     },
+
     toggleRecord() {
-        if (!state.audioContext) AudioEngine.init();
-        if (state.isRecording) {
-            state.isRecording = false; clearInterval(state.timerInterval); $('#recordBtn').classList.remove('recording');
-            const duration = Date.now() - state.startTime; if (duration > 800) { const blob = AudioEngine.createWavBlob(); API.transcribe(blob, duration); } else state.chunks = []; }
-        else { state.chunks = []; state.isRecording = true; state.startTime = Date.now(); $('#recordBtn').classList.add('recording'); state.timerInterval = setInterval(() => { const diff = Math.floor((Date.now() - state.startTime) / 1000); const m = Math.floor(diff / 60).toString().padStart(2,'0'); const s = (diff % 60).toString().padStart(2,'0'); $('#recordTimer').innerText = `${m}:${s}`; }, 1000); }
+        if (!AudioEngine.ctx) AudioEngine.init();
+
+        if (AudioEngine.isRecording) {
+            // Stop Recording
+            AudioEngine.isRecording = false;
+            clearInterval(state.timer);
+            $('#recordBtn').classList.remove('recording');
+            
+            const duration = Date.now() - state.startTime;
+            if (duration > 500) { // En az 0.5sn kayıt
+                const blob = AudioEngine.createWavBlob();
+                API.transcribe(blob, duration);
+            }
+            AudioEngine.chunks = [];
+            $('#recordTimer').innerText = "00:00";
+            $('#recordTimer').style.opacity = "0";
+        } else {
+            // Start Recording
+            AudioEngine.chunks = [];
+            AudioEngine.isRecording = true;
+            state.startTime = Date.now();
+            $('#recordBtn').classList.add('recording');
+            $('#recordTimer').style.opacity = "1";
+            
+            state.timer = setInterval(() => {
+                const diff = Math.floor((Date.now() - state.startTime) / 1000);
+                const m = Math.floor(diff / 60).toString().padStart(2,'0');
+                const s = (diff % 60).toString().padStart(2,'0');
+                $('#recordTimer').innerText = `${m}:${s}`;
+            }, 1000);
+        }
     },
+
+    toggleHandsFree() {
+        state.isHandsFree = !state.isHandsFree;
+        $('#handsFreeToggleBtn').classList.toggle('active');
+        if (state.isHandsFree && !AudioEngine.ctx) AudioEngine.init();
+    },
+
     renderResult(data, durationMs, audioUrl) {
-        const container = $('#transcriptContainer'); if ($('.empty-placeholder')) $('.empty-placeholder')?.remove();
-        const rawSegments = (data.segments && data.segments.length > 0) ? data.segments : [{ text: data.text || "...", start: 0, end: durationMs/1000, speaker_turn_next: false }];
-        let bufferText = ""; let startTime = 0; const segmentsToRender = [];
-        rawSegments.forEach((seg, idx) => {
-            if (idx === 0) startTime = seg.start;
-            bufferText += seg.text;
-            if (seg.speaker_turn_next || idx === rawSegments.length - 1) {
-                // ---- CLUSTER ASSIGN ----
-                const spkId = clusterer.assign_or_add(seg.speaker_vec);
-                if (!speakerMeta[spkId]) {
-                    const idxNum = parseInt(spkId.split('_')[1]);
-                    speakerMeta[spkId] = {
-                        gender: seg.gender || "?",
-                        emotion: seg.emotion || "neutral",
-                        color: speakerColors[idxNum % speakerColors.length],
-                        name: speakerNames[spkId] || `Konuşmacı ${String.fromCharCode(65 + idxNum)}`
-                    };
-                }
-                segmentsToRender.push({ speakerId: spkId, text: bufferText.trim(), start: startTime, end: seg.end });
-                nextSpeaker = 1 - nextSpeaker; bufferText = ""; if (idx < rawSegments.length - 1) startTime = rawSegments[idx+1].start; }
-        });
-        const groupDiv = document.createElement('div');
-        segmentsToRender.forEach(block => {
-            const meta = speakerMeta[spkId];
-            const genderIcon = meta.gender === "M" ? "♂" : "♀";
-            const emotionEmoji = { excited: "🔥", neutral: "😐", sad: "😢", angry: "😠" }[meta.emotion] || "";
-            const pitchBar = Math.min(100, Math.max(0, (meta.vec[0] || 0.5) * 100));
-            const energyBar = Math.min(100, Math.max(0, (meta.vec[2] || 0.5) * 100));
-            groupDiv.innerHTML += `
-                <div class="speaker-group ${block.speakerId === 0 ? 'main' : 'alt'} timeline-block">
-                    <div class="speaker-avatar" style="border-color:${meta.color};color:${meta.color}" 
-                        onclick="ui.renameSpeaker('${spkId}')" title="Tıkla & yeniden adlandır">
-                    ${genderIcon}${emotionEmoji}
+        const container = $('#transcriptContainer');
+        $('.empty-placeholder')?.remove();
+
+        // Segmentleri hazırla (Tek parça metin gelirse onu dizi yap)
+        const segments = (data.segments && data.segments.length > 0) 
+            ? data.segments 
+            : [{ text: data.text, start: 0, end: durationMs/1000, speaker_vec: Array(8).fill(0), gender: '?' }];
+
+        // Kümeleme ve Render Döngüsü
+        segments.forEach((seg, idx) => {
+            // 1. Identify Speaker
+            // Backend'den gelen speaker_vec boşsa veya hatalıysa fallback kullan
+            const vec = (seg.speaker_vec && seg.speaker_vec.length === 8) ? seg.speaker_vec : Array(8).fill(0);
+            const speaker = speakerMgr.assign(vec, { gender: seg.gender });
+            
+            // 2. HTML Construction
+            const div = document.createElement('div');
+            div.className = `speaker-group timeline-block`;
+            // Kendi ID'mize göre (solda veya sağda göstermek için değil, renk için)
+            div.style.setProperty('--spk-color', speaker.color);
+
+            // Duygu Emoji Haritası
+            const emotionMap = { excited: "🔥", neutral: "", sad: "😢", angry: "😠" };
+            const emotionIcon = emotionMap[seg.emotion] || "";
+            const genderIcon = speaker.gender === "F" ? "👩" : "👨";
+
+            // Prosody Barları
+            const pitchPct = Math.min(100, (vec[0] || 0) * 100); // Pitch Mean Normalized
+            const energyPct = Math.min(100, (vec[2] || 0) * 100); // Energy Mean
+
+            div.innerHTML = `
+                <div class="speaker-avatar" style="border-color: ${speaker.color}; color: ${speaker.color}; background: ${speaker.color}15" 
+                     onclick="ui.promptRename('${speaker.id}')" title="İsim Değiştir">
+                    <div class="avatar-icon">${genderIcon}</div>
+                    <div class="emotion-icon">${emotionIcon}</div>
+                </div>
+                <div class="speaker-content">
+                    <div class="speaker-header">
+                        <span class="speaker-name" id="name-${speaker.id}" style="color: ${speaker.color}">${speaker.name}</span>
+                        <span class="time-tag">${seg.start.toFixed(1)}s</span>
                     </div>
-                    <div class="speaker-content">
-                        <div class="speaker-header">
-                            <span class="speaker-name">${meta.name}</span>
-                            <span class="time-tag">${block.start.toFixed(1)}s - ${block.end.toFixed(1)}s</span>
-                        </div>
-                        <div class="text-bubble">${block.text}${audioUrl && block === segmentsToRender[segmentsToRender.length-1] ? ui.createPlayerHtml(audioUrl, durationMs) : ''}</div>
-                        <div class="prosody-bars">
-                            <div class="bar-group"><span>Pitch</span><div class="bar-bg"><div class="bar-fill" style="width:${pitchBar}%"></div></div></div>
-                            <div class="bar-group"><span>Energy</span><div class="bar-bg"><div class="bar-fill" style="width:${energyBar}%"></div></div></div>
-                        </div>
+                    <div class="text-bubble" style="border-left-color: ${speaker.color}">
+                        ${seg.text}
+                        ${audioUrl && idx === segments.length-1 ? ui.createPlayerHtml(audioUrl, durationMs) : ''}
                     </div>
-                </div>`;
+                    <div class="prosody-info">
+                        <div class="p-bar" title="Pitch / Ton"><i class="fas fa-music"></i> <div class="bar-bg"><div class="bar-fill" style="width:${pitchPct}%"></div></div></div>
+                        <div class="p-bar" title="Energy / Ses"><i class="fas fa-bolt"></i> <div class="bar-bg"><div class="bar-fill" style="width:${energyPct}%"></div></div></div>
+                    </div>
+                </div>
+            `;
+            
+            container.appendChild(div);
         });
-        container.appendChild(groupDiv); container.scrollTop = container.scrollHeight;
-        lastData = data; lastDur = durationMs; lastUrl = url;
+
+        container.scrollTop = container.scrollHeight;
+        
+        // Hafızaya al (isim değiştirince yeniden çizmek için gerekebilir, şimdilik basit tutuyoruz)
+        window.lastRenderData = { data, durationMs, audioUrl };
     },
+
     createPlayerHtml(url, durMs) {
-        const sec = (durMs/1000).toFixed(1); let bars = ''; for(let i=0; i<8; i++) bars += `<div class="bar" style="height:${Math.floor(Math.random() * 10) + 4}px"></div>`;
-        return `<div class="inline-player" onclick="ui.playAudio(this, '${url}')"><i class="fas fa-play play-btn"></i><div class="waveform-static">${bars}</div><span class="dur-label">${sec}s</span></div>`;
+        const sec = (durMs/1000).toFixed(1);
+        // Random waveform görseli
+        let bars = '';
+        for(let i=0; i<12; i++) {
+            const h = Math.floor(Math.random() * 12) + 4;
+            bars += `<div class="wf-bar" style="height:${h}px"></div>`;
+        }
+        return `
+            <div class="inline-player" onclick="ui.playAudio(this, '${url}')">
+                <button class="play-icon"><i class="fas fa-play"></i></button>
+                <div class="waveform">${bars}</div>
+                <span class="duration">${sec}s</span>
+            </div>
+        `;
     },
+
     playAudio(el, url) {
-        if (window.currentAudio) { window.currentAudio.pause(); if (window.currentBtn) window.currentBtn.className = "fas fa-play play-btn"; }
-        const icon = el.querySelector('i'); if (icon.classList.contains('fa-pause')) return;
-        const audio = new Audio(url); window.currentAudio = audio; window.currentBtn = icon;
-        icon.className = "fas fa-pause play-btn"; audio.play(); audio.onended = () => icon.className = "fas fa-play play-btn";
+        if (window.currentAudio) {
+            window.currentAudio.pause();
+            if (window.currentBtn) window.currentBtn.className = "fas fa-play";
+        }
+        
+        const icon = el.querySelector('i');
+        if (icon.classList.contains('fa-pause')) return;
+
+        const audio = new Audio(url);
+        window.currentAudio = audio;
+        window.currentBtn = icon;
+
+        icon.className = "fas fa-pause";
+        audio.play();
+        audio.onended = () => icon.className = "fas fa-play";
     },
+
+    promptRename(id) {
+        const cls = speakerMgr.clusters[id];
+        if (!cls) return;
+        const newName = prompt(`"${cls.name}" için yeni isim:`, cls.name);
+        if (newName && newName.trim()) {
+            speakerMgr.rename(id, newName.trim());
+            // UI'daki tüm etiketleri güncelle
+            $$(`#name-${id}`).forEach(el => el.innerText = newName.trim());
+        }
+    },
+
     addTempMessage() {
-        const container = $('#transcriptContainer'); const id = 'temp-' + Date.now(); const div = document.createElement('div'); div.id = id; div.className = 'speaker-group main timeline-block';
-        div.innerHTML = `<div class="speaker-avatar"><i class="fas fa-circle-notch fa-spin"></i></div><div class="speaker-content"><div class="text-bubble" style="opacity:0.7">Analiz ediliyor...</div></div>`;
-        container.appendChild(div); container.scrollTop = container.scrollHeight; return id;
+        const container = $('#transcriptContainer');
+        const id = 'temp-' + Date.now();
+        const div = document.createElement('div');
+        div.id = id;
+        div.className = 'speaker-group timeline-block temp';
+        div.innerHTML = `
+            <div class="speaker-avatar skeleton"></div>
+            <div class="speaker-content">
+                <div class="text-bubble skeleton-text">Processing...</div>
+            </div>
+        `;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+        return id;
     },
+
     removeElement(id) { document.getElementById(id)?.remove(); },
+
     updateMetrics(dur, proc, data) {
-        $('#durVal').innerText = (dur/1000).toFixed(2) + 's'; $('#procVal').innerText = (proc/1000).toFixed(2) + 's';
-        let rtf = 0; if (data.meta && data.meta.rtf) rtf = (1 / data.meta.rtf).toFixed(1); $('#rtfVal').innerText = rtf + 'x';
+        $('#durVal').innerText = (dur/1000).toFixed(2) + 's';
+        $('#procVal').innerText = (proc/1000).toFixed(2) + 's';
+        
+        let rtf = data.meta?.rtf ? (1 / data.meta.rtf).toFixed(1) : "0.0";
+        $('#rtfVal').innerText = rtf + 'x';
+        
         $('#langVal').innerText = (data.language || '?').toUpperCase();
-        let avgProb = 0; if (data.segments && data.segments.length > 0) { const sum = data.segments.reduce((acc, s) => acc + s.probability, 0); avgProb = (sum / data.segments.length) * 100; }
-        $('#confVal').innerText = avgProb > 0 ? `%${avgProb.toFixed(1)}` : '--'; $('#jsonLog').innerText = JSON.stringify(data, null, 2);
+        
+        // Confidence Avg
+        let avgProb = 0;
+        if (data.segments && data.segments.length > 0) {
+            avgProb = data.segments.reduce((acc, s) => acc + s.probability, 0) / data.segments.length;
+        }
+        $('#confVal').innerText = `%${(avgProb * 100).toFixed(1)}`;
+        
+        $('#jsonLog').innerText = JSON.stringify(data, null, 2);
     },
+
     toggleDebugJson() { $('#jsonLog').classList.toggle('hidden'); },
+
     startVisualizer() {
-        const canvas = $('#visualizerCanvas'); const ctx = canvas.getContext('2d');
-        canvas.width = canvas.parentElement.offsetWidth; canvas.height = canvas.parentElement.offsetHeight;
-        const bufferLen = state.analyser.frequencyBinCount; const dataArray = new Uint8Array(bufferLen);
-        const draw = () => { requestAnimationFrame(draw); state.analyser.getByteFrequencyData(dataArray); ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const barWidth = (canvas.width / bufferLen) * 2; let x = 0;
-            for (let i = 0; i < bufferLen; i++) { const v = dataArray[i]; const h = (v / 255) * canvas.height; ctx.fillStyle = `rgba(0, 229, 153, ${v / 400})`; ctx.fillRect(x, canvas.height - h, barWidth, h); x += barWidth + 2; } }; draw();
+        const canvas = $('#visualizerCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+
+        const bufferLength = AudioEngine.analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const draw = () => {
+            requestAnimationFrame(draw);
+            AudioEngine.analyser.getByteFrequencyData(dataArray);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const barWidth = (canvas.width / bufferLength) * 2.5;
+            let barHeight;
+            let x = 0;
+
+            for (let i = 0; i < bufferLength; i++) {
+                barHeight = (dataArray[i] / 255) * canvas.height;
+                ctx.fillStyle = `rgba(59, 130, 246, ${dataArray[i] / 300})`; // Blue tint
+                ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                x += barWidth + 1;
+            }
+        };
+        draw();
     },
-    toggleSidebar(side) { const el = side === 'left' ? $('#leftSidebar') : $('#rightSidebar'); el.classList.add('active'); $('#backdrop').classList.add('active'); },
-    closeSidebars() { $$('.sidebar').forEach(s => s.classList.remove('active')); $('#backdrop').classList.remove('active'); },
-    updateStatus(txt) { $('#connStatus span').innerText = txt; },
-    clearChat() { $('#transcriptContainer').innerHTML = ''; nextSpeaker = 0; Object.keys(speakerMeta).forEach(k => delete speakerMeta[k]); },
-    exportTranscript(fmt) {
-        const data = { speakers: speakerMeta, segments: Array.from($$('#transcriptContainer .timeline-block')).map(b => ({ text: b.querySelector('.text-bubble').textContent.trim() })) };
-        const blob = new Blob([fmt === 'json' ? JSON.stringify(data, null, 2) : data.segments.map(s => s.text).join('\n')], { type: fmt === 'json' ? 'application/json' : 'text/plain' });
-        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `sentiric-transcript.${fmt}`; a.click(); URL.revokeObjectURL(url);
+
+    toggleSidebar(side) { 
+        const el = side === 'left' ? $('#leftSidebar') : $('#rightSidebar');
+        el.classList.add('active');
+        $('#backdrop').classList.add('active');
+    },
+    closeSidebars() { 
+        $$('.sidebar').forEach(s => s.classList.remove('active'));
+        $('#backdrop').classList.remove('active');
+    },
+    clearChat() {
+        $('#transcriptContainer').innerHTML = '';
+        speakerMgr.reset();
+    },
+    exportTranscript(type) {
+        const lines = [];
+        $$('.speaker-group:not(.temp)').forEach(grp => {
+            const name = grp.querySelector('.speaker-name').innerText;
+            const text = grp.querySelector('.text-bubble').innerText.replace(/\n/g, ' ');
+            lines.push(type === 'json' ? {speaker: name, text} : `[${name}]: ${text}`);
+        });
+        
+        const content = type === 'json' ? JSON.stringify(lines, null, 2) : lines.join('\n');
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `transcript.${type}`;
+        a.click();
     }
 };
 
-ui.renameSpeaker = (id) => {
-    const newName = prompt("Yeni isim:", speakerMeta[id].name);
-    if (newName && newName.trim()) {
-        speakerMeta[id].name = newName.trim();
-        speakerNames[id] = newName.trim();
-        ui.renderResult(lastData, lastDur, lastUrl); // yeniden çiz
-    }
-};
-
-// ---------- GLOBAL CACHE (son render verisi) ----------
-let lastData = null, lastDur = 0, lastUrl = null;
-
-// ---------- STATE ----------
-const state = {
-    isRecording: false, isHandsFree: false, startTime: 0, timerInterval: null,
-    audioContext: null, analyser: null, silenceStart: null, isSpeaking: false, chunks: [],
-    vadThreshold: 0.02, silenceDuration: 1500,
-};
-
+// Start
 ui.init();
