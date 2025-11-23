@@ -2,185 +2,150 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
 // =============================================================================
-// 🎨 THEME ENGINE
+// 🧠 SPEAKER SYSTEM (Clustering & Identity)
 // =============================================================================
-const ThemeManager = {
-    init() {
-        // Load saved theme or default to dark
-        const savedTheme = localStorage.getItem('sentiric-theme') || 'dark';
-        document.body.setAttribute('data-theme', savedTheme);
-        this.updateIcons(savedTheme);
-
-        // Bind buttons (Mobile & Desktop)
-        $$('.theme-toggle').forEach(btn => {
-            btn.onclick = () => this.toggle();
-        });
-    },
-
-    toggle() {
-        const current = document.body.getAttribute('data-theme');
-        const next = current === 'dark' ? 'light' : 'dark';
-        document.body.setAttribute('data-theme', next);
-        localStorage.setItem('sentiric-theme', next);
-        this.updateIcons(next);
-    },
-
-    updateIcons(theme) {
-        $$('.theme-toggle i').forEach(icon => {
-            icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-        });
-    }
-};
-
-// =============================================================================
-// 🧠 SPEAKER MANAGER (Anti-Jitter Edition)
-// =============================================================================
-class SpeakerManager {
+class SpeakerSystem {
     constructor() {
-        this.threshold = 0.85;
+        this.threshold = 0.85; 
         this.clusters = {}; 
         this.nextId = 0;
-        // Premium Colors
         this.colors = [
             "#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", 
             "#EC4899", "#06B6D4", "#84CC16", "#F97316", "#6366F1"
         ];
-        this.lastSpeakerId = null; // For jitter prevention
     }
 
     setThreshold(val) { this.threshold = parseFloat(val); }
 
-    cosine(vecA, vecB) {
-        let dot = 0, normA = 0, normB = 0;
-        for (let i = 0; i < vecA.length; i++) {
-            dot += vecA[i] * vecB[i];
-            normA += vecA[i] * vecA[i];
-            normB += vecB[i] * vecB[i];
-        }
-        if (normA === 0 || normB === 0) return 0;
-        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    cosineSim(a, b) {
+        let dot=0, ma=0, mb=0;
+        for(let i=0; i<a.length; i++) { dot+=a[i]*b[i]; ma+=a[i]*a[i]; mb+=b[i]*b[i]; }
+        return ma&&mb ? dot / Math.sqrt(ma*mb) : 0;
     }
 
-    assign(vector, meta) {
-        let bestId = null;
-        let bestScore = -1;
+    identify(vector, meta) {
+        // Vektör validasyonu
+        if(!vector || vector.length !== 8) vector = new Array(8).fill(0);
 
+        let bestId = null, bestScore = -1;
+        
         for (const id in this.clusters) {
-            const score = this.cosine(vector, this.clusters[id].centroid);
-            if (score > bestScore) {
-                bestScore = score;
-                bestId = id;
-            }
+            const score = this.cosineSim(vector, this.clusters[id].centroid);
+            if (score > bestScore) { bestScore = score; bestId = id; }
         }
-
-        // Hysteresis Logic: Eğer skor eşiği geçiyorsa ama çok yüksek değilse
-        // ve bir önceki konuşmacı bu kişiye yakınsa, geçiş yapma (Jitter önlemi)
-        let finalId = null;
 
         if (bestId && bestScore >= this.threshold) {
-            this.updateCluster(bestId, vector, meta);
-            finalId = bestId;
-        } else {
-            finalId = this.createCluster(vector, meta).id;
+            this.update(bestId, vector, meta);
+            return this.clusters[bestId];
         }
-
-        this.lastSpeakerId = finalId;
-        return this.clusters[finalId];
+        return this.create(vector, meta);
     }
 
-    createCluster(vector, meta) {
-        const id = `spk_${this.nextId++}`;
-        const color = this.colors[this.nextId % this.colors.length];
+    create(vector, meta) {
+        const id = `s_${this.nextId++}`;
         this.clusters[id] = {
-            id: id,
+            id,
             centroid: [...vector],
             count: 1,
-            name: `Konuşmacı ${String.fromCharCode(65 + (this.nextId - 1))}`,
-            color: color,
-            gender: meta.gender || "?",
+            name: `Konuşmacı ${String.fromCharCode(65 + (this.nextId - 1))}`, // A, B, C...
+            color: this.colors[this.nextId % this.colors.length],
+            gender: meta.gender || '?'
         };
         return this.clusters[id];
     }
 
-    updateCluster(id, vector, meta) {
-        const cls = this.clusters[id];
-        const learningRate = cls.count < 10 ? 0.2 : 0.05; // Yavaş yavaş oturur
-        
-        for (let i = 0; i < vector.length; i++) {
-            cls.centroid[i] = cls.centroid[i] * (1 - learningRate) + vector[i] * learningRate;
-        }
-        cls.count++;
-        if (meta.gender && meta.gender !== "?") cls.gender = meta.gender;
+    update(id, vector, meta) {
+        const c = this.clusters[id];
+        // Weighted Moving Average (Anti-Jitter)
+        const lr = c.count < 5 ? 0.3 : 0.05; // Başta hızlı öğren, sonra sabitle
+        for(let i=0; i<8; i++) c.centroid[i] = c.centroid[i]*(1-lr) + vector[i]*lr;
+        c.count++;
+        if(meta.gender && meta.gender !== '?') c.gender = meta.gender; // Cinsiyeti güncelle
     }
 
-    rename(id, newName) {
-        if (this.clusters[id]) {
-            this.clusters[id].name = newName;
-            return true;
+    rename(id) {
+        const c = this.clusters[id];
+        if(!c) return;
+        const n = prompt("Yeni isim:", c.name);
+        if(n) { 
+            c.name = n.trim(); 
+            // UI Update
+            $$(`.spk-lbl-${id}`).forEach(el => el.innerText = c.name);
         }
-        return false;
     }
 
-    reset() {
-        this.clusters = {};
-        this.nextId = 0;
-        this.lastSpeakerId = null;
-    }
+    reset() { this.clusters = {}; this.nextId = 0; }
 }
 
-const speakerMgr = new SpeakerManager();
+const Speaker = new SpeakerSystem();
 
 // =============================================================================
-// 🎤 AUDIO ENGINE
+// 🎹 AUDIO ENGINE (Recording & Viz)
 // =============================================================================
-const AudioEngine = {
-    ctx: null, analyser: null, scriptNode: null, chunks: [], isRecording: false,
-    
+const AudioSys = {
+    ctx: null, analyser: null, script: null, 
+    chunks: [], isRec: false, timer: null, startT: 0, handsFree: false, lastSpk: 0, isSpk: false,
+
     async init() {
-        if (this.ctx) return;
+        if(this.ctx) return;
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const source = this.ctx.createMediaStreamSource(stream);
+        const src = this.ctx.createMediaStreamSource(stream);
         this.analyser = this.ctx.createAnalyser(); 
         this.analyser.fftSize = 256; 
-        this.analyser.smoothingTimeConstant = 0.5;
-        this.scriptNode = this.ctx.createScriptProcessor(4096, 1, 1);
-        source.connect(this.analyser); 
-        this.analyser.connect(this.scriptNode); 
-        this.scriptNode.connect(this.ctx.destination);
-        this.scriptNode.onaudioprocess = (e) => this.process(e);
-        ui.startVisualizer();
+        this.analyser.smoothingTimeConstant = 0.6;
+        this.script = this.ctx.createScriptProcessor(4096, 1, 1);
+        src.connect(this.analyser); this.analyser.connect(this.script); this.script.connect(this.ctx.destination);
+        this.script.onaudioprocess = e => this.process(e);
+        UI.startViz();
     },
 
     process(e) {
-        const input = e.inputBuffer.getChannelData(0);
-        let sum = 0; for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
-        const rms = Math.sqrt(sum / input.length);
+        const inData = e.inputBuffer.getChannelData(0);
+        
+        // VAD RMS Calc
+        let s = 0; for(let i=0; i<inData.length; i++) s += inData[i]*inData[i];
+        const rms = Math.sqrt(s/inData.length);
 
-        if (this.isRecording) this.chunks.push(this.floatTo16Bit(input));
+        if(this.isRec) this.chunks.push(this.floatTo16(inData));
 
-        if (state.isHandsFree) {
-            const threshold = parseFloat($('#vadRange').value);
-            if (rms > threshold) {
-                state.lastSpeechTime = Date.now();
-                if (!state.isSpeaking) { state.isSpeaking = true; if (!this.isRecording) ui.toggleRecord(); }
-            } else if (state.isSpeaking) {
-                if (Date.now() - state.lastSpeechTime > 1500) { state.isSpeaking = false; if (this.isRecording) ui.toggleRecord(); }
+        if(this.handsFree) {
+            const th = parseFloat($('#vadRange').value);
+            if(rms > th) {
+                this.lastSpk = Date.now();
+                if(!this.isSpk) { this.isSpk = true; if(!this.isRec) UI.toggleRec(); }
+            } else if(this.isSpk && Date.now() - this.lastSpk > 1500) {
+                this.isSpk = false; if(this.isRec) UI.toggleRec();
             }
         }
     },
-    floatTo16Bit(input) { const output = new Int16Array(input.length); for (let i = 0; i < input.length; i++) { let s = Math.max(-1, Math.min(1, input[i])); output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; } return output; },
-    createWavBlob() {
-        const totalLen = this.chunks.reduce((acc, c) => acc + c.length, 0); const result = new Int16Array(totalLen); let offset = 0; for (const c of this.chunks) { result.set(c, offset); offset += c.length; }
-        const buffer = new ArrayBuffer(44 + result.length * 2); const view = new DataView(buffer); const rate = this.ctx.sampleRate;
-        const writeString = (v, o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
-        writeString(view, 0, 'RIFF'); view.setUint32(4, 36 + result.length * 2, true); writeString(view, 8, 'WAVE'); writeString(view, 12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); writeString(view, 36, 'data'); view.setUint32(40, result.length * 2, true);
-        const pcm = new Int16Array(buffer, 44); pcm.set(result); return new Blob([buffer], { type: 'audio/wav' });
+
+    floatTo16(input) {
+        const out = new Int16Array(input.length);
+        for(let i=0; i<input.length; i++) {
+            let s = Math.max(-1, Math.min(1, input[i]));
+            out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        return out;
+    },
+
+    getBlob() {
+        const len = this.chunks.reduce((a,c)=>a+c.length,0); const res = new Int16Array(len); let o=0;
+        for(let c of this.chunks) { res.set(c,o); o+=c.length; }
+        // Simple WAV Header
+        const b = new ArrayBuffer(44+res.length*2); const v = new DataView(b); const r = this.ctx.sampleRate;
+        const w = (O,S)=> { for(let i=0;i<S.length;i++)v.setUint8(O+i,S.charCodeAt(i)); };
+        w(0,'RIFF'); v.setUint32(4,36+res.length*2,true); w(8,'WAVEfmt '); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+        v.setUint32(24,r,true); v.setUint32(28,r*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,res.length*2,true);
+        new Int16Array(b,44).set(res); return new Blob([b],{type:'audio/wav'});
     }
 };
 
+// =============================================================================
+// 🌐 API LAYER
+// =============================================================================
 const API = {
-    async transcribe(blob, durationMs) {
+    async send(blob, durMs) {
         const fd = new FormData();
         fd.append('file', blob);
         fd.append('language', $('#langSelect').value);
@@ -188,173 +153,202 @@ const API = {
         fd.append('translate', $('#translateToggle').checked);
         fd.append('diarization', $('#diarizationToggle').checked);
         fd.append('temperature', $('#tempRange').value);
-        
-        const tempId = ui.addTempMessage();
+        fd.append('beam_size', $('#beamRange').value);
+        // vad_threshold backend config'de, client'da VAD logic var.
+
+        const tempId = UI.showLoading();
         try {
             const t0 = Date.now();
-            const res = await fetch('/v1/transcribe', { method: 'POST', body: fd });
-            const data = await res.json();
-            ui.removeElement(tempId);
-            if (res.ok) {
+            const r = await fetch('/v1/transcribe', { method: 'POST', body: fd });
+            const d = await r.json();
+            UI.removeLoading(tempId);
+            
+            if(r.ok) {
                 const url = URL.createObjectURL(blob);
-                ui.renderResult(data, durationMs, url);
-                ui.updateMetrics(durationMs, Date.now() - t0, data);
+                UI.render(d, durMs, url);
+                UI.updateMetrics(durMs, Date.now()-t0, d);
+            } else {
+                console.error(d);
+                alert("API Hatası: " + (d.error || "Bilinmiyor"));
             }
-        } catch (e) { ui.removeElement(tempId); console.error(e); }
+        } catch(e) {
+            UI.removeLoading(tempId);
+            console.error(e);
+        }
     }
 };
 
 // =============================================================================
 // 🎨 UI CONTROLLER
 // =============================================================================
-const state = { isHandsFree: false, lastSpeechTime: 0, isSpeaking: false, startTime: 0, timer: null };
-
-const ui = {
+const UI = {
     init() {
-        ThemeManager.init();
+        // --- Sidebar Logic ---
+        const tog = (id, s) => { $(id).classList.toggle('active', s); $('#backdrop').classList.toggle('active', s); };
+        $('#mobLeftBtn').onclick = () => tog('#sidebarLeft', true);
+        $('#mobRightBtn').onclick = () => tog('#sidebarRight', true);
+        $('#closeLeft').onclick = () => tog('#sidebarLeft', false);
+        $('#closeRight').onclick = () => tog('#sidebarRight', false);
+        $('#backdrop').onclick = () => { $$('.sidebar').forEach(s=>s.classList.remove('active')); $('#backdrop').classList.remove('active'); };
 
-        $('#mobileMenuBtn').onclick = () => this.toggleSidebar('left');
-        $('#mobileMetricsBtn').onclick = () => this.toggleSidebar('right');
-        $('#closeLeftSidebar').onclick = () => this.closeSidebars();
-        $('#closeRightSidebar').onclick = () => this.closeSidebars();
-        $('#backdrop').onclick = () => this.closeSidebars();
-
-        $('#recordBtn').onclick = () => this.toggleRecord();
-        $('#handsFreeToggleBtn').onclick = () => this.toggleHandsFree();
-        $('#fileInput').onchange = (e) => { if(e.target.files[0]) API.transcribe(e.target.files[0], 0); };
+        // --- Controls Bindings ---
+        $('#tempRange').oninput = e => $('#tempDisplay').innerText = e.target.value;
+        $('#beamRange').oninput = e => $('#beamDisplay').innerText = e.target.value;
+        $('#clusterRange').oninput = e => { $('#clusterDisplay').innerText = e.target.value; Speaker.setThreshold(e.target.value); };
+        $('#vadRange').oninput = e => $('#vadDisplay').innerText = e.target.value;
         
-        $('#tempRange').oninput = (e) => $('#tempVal').innerText = e.target.value;
-        $('#vadRange').oninput = (e) => $('#vadVal').innerText = e.target.value;
-        $('#clusterThreshold').oninput = (e) => {
-            $('#clusterVal').innerText = e.target.value;
-            speakerMgr.setThreshold(e.target.value);
-        };
-
-        document.addEventListener('keydown', (e) => { 
-            if (e.code === 'Space' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') { 
-                e.preventDefault(); this.toggleRecord(); 
-            } 
+        // --- Action Buttons ---
+        $('#recordBtn').onclick = () => this.toggleRec();
+        $('#vadBtn').onclick = () => this.toggleVad();
+        $('#fileInput').onchange = e => { if(e.target.files[0]) API.send(e.target.files[0], 0); };
+        
+        // --- Theme ---
+        const t = localStorage.getItem('theme') || 'dark';
+        document.body.setAttribute('data-theme', t);
+        $$('.theme-toggle').forEach(b => b.onclick = () => {
+            const n = document.body.getAttribute('data-theme')=='dark'?'light':'dark';
+            document.body.setAttribute('data-theme', n); localStorage.setItem('theme', n);
         });
+
+        // --- Keyboard ---
+        document.onkeydown = e => { if(e.code=='Space' && e.target.tagName!='TEXTAREA' && e.target.tagName!='INPUT') { e.preventDefault(); this.toggleRec(); } };
     },
 
-    toggleSidebar(side) {
-        const el = side === 'left' ? $('#leftSidebar') : $('#rightSidebar');
-        el.classList.add('active');
-        $('#backdrop').classList.add('active');
-    },
-    closeSidebars() {
-        $$('.sidebar').forEach(s => s.classList.remove('active'));
-        $('#backdrop').classList.remove('active');
-    },
-
-    toggleRecord() {
-        if (!AudioEngine.ctx) AudioEngine.init();
-        if (AudioEngine.isRecording) {
-            AudioEngine.isRecording = false; clearInterval(state.timer); $('#recordBtn').classList.remove('recording');
-            const duration = Date.now() - state.startTime;
-            if (duration > 500) { API.transcribe(AudioEngine.createWavBlob(), duration); }
-            AudioEngine.chunks = []; $('#recordTimer').innerText = "00:00"; $('#recordTimer').style.opacity = "0";
+    toggleRec() {
+        if(!AudioSys.ctx) AudioSys.init();
+        if(AudioSys.isRec) {
+            // STOP
+            AudioSys.isRec = false; clearInterval(AudioSys.timer);
+            $('#recordBtn').classList.remove('recording');
+            const dur = Date.now() - AudioSys.startT;
+            if(dur > 500) API.send(AudioSys.getBlob(), dur);
+            AudioSys.chunks = []; $('#recordTimer').innerText = "00:00"; $('#recordTimer').style.opacity = '0';
         } else {
-            AudioEngine.chunks = []; AudioEngine.isRecording = true; state.startTime = Date.now();
-            $('#recordBtn').classList.add('recording'); $('#recordTimer').style.opacity = "1";
-            state.timer = setInterval(() => {
-                const diff = Math.floor((Date.now() - state.startTime) / 1000);
-                $('#recordTimer').innerText = `${Math.floor(diff/60).toString().padStart(2,'0')}:${(diff%60).toString().padStart(2,'0')}`;
+            // START
+            AudioSys.chunks = []; AudioSys.isRec = true; AudioSys.startT = Date.now();
+            $('#recordBtn').classList.add('recording'); $('#recordTimer').style.opacity = '1';
+            AudioSys.timer = setInterval(() => {
+                const d = Math.floor((Date.now() - AudioSys.startT)/1000);
+                $('#recordTimer').innerText = `${String(Math.floor(d/60)).padStart(2,'0')}:${String(d%60).padStart(2,'0')}`;
             }, 1000);
         }
     },
 
-    toggleHandsFree() {
-        state.isHandsFree = !state.isHandsFree;
-        $('#handsFreeToggleBtn').classList.toggle('active');
-        if (state.isHandsFree && !AudioEngine.ctx) AudioEngine.init();
+    toggleVad() {
+        AudioSys.handsFree = !AudioSys.handsFree;
+        $('#vadBtn').classList.toggle('active');
+        $('#vadBtn .active-dot').style.display = AudioSys.handsFree ? 'block' : 'none';
+        if(AudioSys.handsFree && !AudioSys.ctx) AudioSys.init();
     },
 
-    renderResult(data, durationMs, audioUrl) {
-        const container = $('#transcriptContainer');
-        $('.empty-state')?.remove();
-        const segments = (data.segments && data.segments.length > 0) ? data.segments : [{ text: data.text, start: 0, speaker_vec: Array(8).fill(0), gender: '?' }];
+    render(data, dur, url) {
+        const c = $('#transcriptFeed');
+        $('.empty-placeholder')?.remove();
 
-        segments.forEach((seg, idx) => {
-            const vec = (seg.speaker_vec && seg.speaker_vec.length === 8) ? seg.speaker_vec : Array(8).fill(0);
-            const speaker = speakerMgr.assign(vec, { gender: seg.gender });
-            
-            const div = document.createElement('div');
-            div.className = `timeline-block`;
-            
-            const emotionMap = { excited: "🔥", neutral: "", sad: "😢", angry: "😠" };
-            const genderIcon = speaker.gender === "F" ? "👩" : "👨";
-            const pitchPct = Math.min(100, (vec[0] || 0) * 100); 
-            const energyPct = Math.min(100, (vec[2] || 0) * 100); 
+        const segs = data.segments && data.segments.length ? data.segments : [{text: data.text, start:0, speaker_vec:[], gender:'?'}];
 
-            div.innerHTML = `
-                <div class="speaker-avatar" style="border-color: ${speaker.color}; color: ${speaker.color}" onclick="ui.promptRename('${speaker.id}')">
-                    <div>${genderIcon}</div><div class="emotion-badge">${emotionMap[seg.emotion] || ""}</div>
+        segs.forEach((seg, idx) => {
+            // Hallucination Check
+            const isBad = seg.text.match(/^(\[|\(|\-Altyazı)/) || seg.text.length < 2;
+            const spk = Speaker.identify(seg.speaker_vec, {gender: seg.gender});
+            
+            // Emoji Map
+            const emo = { excited:"🔥", sad:"😢", angry:"😠" }[seg.emotion] || "";
+            const gen = spk.gender === 'F' ? '👩' : '👨';
+
+            // Bars calculation (from vec)
+            const vec = seg.speaker_vec || [0,0,0,0,0,0,0,0];
+            const pPct = Math.min(100, (vec[0]||0)*100);
+            const ePct = Math.min(100, (vec[2]||0)*100);
+
+            // Audio Waveform (Random for viz)
+            let waves = ''; for(let i=0; i<12; i++) waves += `<div class="wave-line" style="height:${Math.random()*8+4}px"></div>`;
+
+            const html = `
+            <div class="speaker-row">
+                <div class="avatar-box" style="border-color:${spk.color}; color:${spk.color}" onclick="Speaker.rename('${spk.id}')">
+                    ${gen}<div class="emo-tag">${emo}</div>
                 </div>
-                <div class="speaker-content">
-                    <div class="speaker-meta">
-                        <span class="speaker-name" id="name-${speaker.id}" style="color: ${speaker.color}">${speaker.name}</span>
-                        <span class="time-stamp">${seg.start.toFixed(1)}s</span>
+                <div class="msg-content">
+                    <div class="msg-meta">
+                        <span class="spk-label spk-lbl-${spk.id}" style="color:${spk.color}">${spk.name}</span>
+                        <span class="time-label">${seg.start.toFixed(1)}s</span>
                     </div>
-                    <div class="bubble" style="border-left-color: ${speaker.color}">${seg.text}</div>
-                    ${audioUrl && idx === segments.length-1 ? ui.createPlayerHtml(audioUrl, durationMs) : ''}
-                    <div class="prosody-strip">
-                        <div class="p-meter"><i class="fas fa-music"></i><div class="p-track"><div class="p-fill" style="width:${pitchPct}%; background:${speaker.color}"></div></div></div>
-                        <div class="p-meter"><i class="fas fa-bolt"></i><div class="p-track"><div class="p-fill" style="width:${energyPct}%; background:${speaker.color}"></div></div></div>
+                    <div class="bubble ${isBad?'hallucination':''}" style="border-left-color:${spk.color}">
+                        ${seg.text}
                     </div>
-                </div>`;
-            container.appendChild(div);
+                    <div class="features-row">
+                        ${url && idx===segs.length-1 ? `<div class="mini-player" onclick="UI.play(this,'${url}')"><div class="play-icon"><i class="fas fa-play"></i></div><div class="wave-vis">${waves}</div></div>` : ''}
+                        <div class="prosody-item" title="Pitch"><i class="fas fa-music"></i><div class="bar-track"><div class="bar-fill" style="width:${pPct}%; background:${spk.color}"></div></div></div>
+                        <div class="prosody-item" title="Energy"><i class="fas fa-bolt"></i><div class="bar-track"><div class="bar-fill" style="width:${ePct}%; background:${spk.color}"></div></div></div>
+                    </div>
+                </div>
+            </div>`;
+            c.insertAdjacentHTML('beforeend', html);
         });
-        container.scrollTop = container.scrollHeight;
+        c.scrollTop = c.scrollHeight;
     },
 
-    createPlayerHtml(url, durMs) {
-        let bars = ''; for(let i=0; i<12; i++) bars += `<div class="wave-bar" style="height:${Math.floor(Math.random()*12)+4}px"></div>`;
-        return `<div class="audio-player" onclick="ui.playAudio(this, '${url}')"><div class="play-icon"><i class="fas fa-play"></i></div><div class="wave-visual">${bars}</div><span class="duration">${(durMs/1000).toFixed(1)}s</span></div>`;
-    },
-    playAudio(el, url) {
-        const icon = el.querySelector('i');
-        if (icon.classList.contains('fa-pause')) { window.currentAudio.pause(); return; }
-        if (window.currentAudio) { window.currentAudio.pause(); window.currentBtn.className = "fas fa-play"; }
-        const audio = new Audio(url); window.currentAudio = audio; window.currentBtn = icon;
-        icon.className = "fas fa-pause"; audio.play(); audio.onended = () => icon.className = "fas fa-play";
+    play(el, url) {
+        const i = el.querySelector('i');
+        if(i.classList.contains('fa-pause')) { window.audio.pause(); return; }
+        if(window.audio) { window.audio.pause(); window.playBtn.className='fas fa-play'; }
+        window.audio = new Audio(url); window.playBtn = i;
+        i.className = 'fas fa-pause'; window.audio.play(); 
+        window.audio.onended = () => i.className = 'fas fa-play';
+        window.audio.onpause = () => i.className = 'fas fa-play';
     },
 
-    promptRename(id) {
-        const newName = prompt("İsim:", speakerMgr.clusters[id].name);
-        if (newName) { speakerMgr.rename(id, newName); $$(`#name-${id}`).forEach(el => el.innerText = newName); }
-    },
-    addTempMessage() {
-        const id = 'temp-' + Date.now();
-        $('#transcriptContainer').insertAdjacentHTML('beforeend', `<div id="${id}" class="timeline-block" style="opacity:0.5"><div class="speaker-avatar"><i class="fas fa-circle-notch fa-spin"></i></div><div class="speaker-content"><div class="bubble">...</div></div></div>`);
-        $('#transcriptContainer').scrollTop = $('#transcriptContainer').scrollHeight;
+    showLoading() {
+        const id = 'tmp-'+Date.now();
+        $('#transcriptFeed').insertAdjacentHTML('beforeend', `<div id="${id}" class="speaker-row" style="opacity:0.5"><div class="avatar-box"><i class="fas fa-circle-notch fa-spin"></i></div><div class="msg-content"><div class="bubble">Analiz ediliyor...</div></div></div>`);
         return id;
     },
-    removeElement(id) { document.getElementById(id)?.remove(); },
+    removeLoading(id) { document.getElementById(id)?.remove(); },
+
     updateMetrics(dur, proc, data) {
-        $('#durVal').innerText = (dur/1000).toFixed(2)+'s'; $('#procVal').innerText = (proc/1000).toFixed(2)+'s';
-        $('#rtfVal').innerText = data.meta?.rtf ? (1/data.meta.rtf).toFixed(1)+'x' : '0.0x';
+        $('#durVal').innerText = (dur/1000).toFixed(2)+'s';
+        $('#procVal').innerText = (proc/1000).toFixed(2)+'s';
+        const rtf = data.meta?.rtf ? (1/data.meta.rtf).toFixed(1) : 0;
+        $('#rtfVal').innerText = rtf + 'x';
         $('#langVal').innerText = (data.language || '?').toUpperCase();
-        $('#jsonLog').innerText = JSON.stringify(data, null, 2);
+        
+        let conf = 0; if(data.segments?.length) conf = data.segments.reduce((a,b)=>a+b.probability,0)/data.segments.length;
+        $('#confVal').innerText = Math.round(conf*100) + '%';
+        $('#jsonOutput').innerText = JSON.stringify(data, null, 2);
     },
-    copyJson() { navigator.clipboard.writeText($('#jsonLog').innerText); },
-    clearChat() { $('#transcriptContainer').innerHTML = '<div class="empty-state"><div class="icon-box"><i class="fas fa-microphone-lines"></i></div><h3>Kayda Hazır</h3></div>'; speakerMgr.reset(); },
-    exportTranscript(type) {
-        const lines = []; $$('.timeline-block').forEach(grp => { if(grp.id.startsWith('temp'))return; const name=grp.querySelector('.speaker-name').innerText; const text=grp.querySelector('.bubble').innerText.replace(/\n/g,' '); lines.push(type==='json'?{speaker:name,text}:`[${name}]: ${text}`); });
-        const blob=new Blob([type==='json'?JSON.stringify(lines,null,2):lines.join('\n')],{type:'text/plain'});
-        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='transcript.'+type; a.click();
+
+    copyJson() { navigator.clipboard.writeText($('#jsonOutput').innerText); },
+    clear() { $('#transcriptFeed').innerHTML = '<div class="empty-placeholder"><div class="placeholder-icon"><i class="fas fa-microphone-lines"></i></div><h3>Temizlendi</h3></div>'; Speaker.reset(); },
+    export(t) {
+        let txt=""; $$('.speaker-row').forEach(r=>{ 
+            if(r.id.startsWith('tmp'))return;
+            const n=r.querySelector('.spk-label').innerText; 
+            const m=r.querySelector('.bubble').innerText.replace(/\n/g,' ');
+            txt += t=='json' ? JSON.stringify({speaker:n,text:m})+"," : `[${n}]: ${m}\n`; 
+        });
+        const blob=new Blob([txt],{type:'text/plain'});
+        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='transcript.'+t; a.click();
     },
-    startVisualizer() {
-        const cvs = $('#visualizerCanvas'), ctx = cvs.getContext('2d');
-        const resize = () => { cvs.width = cvs.parentElement.offsetWidth; cvs.height = cvs.parentElement.offsetHeight; };
-        window.onresize = resize; resize();
-        const data = new Uint8Array(AudioEngine.analyser.frequencyBinCount);
-        const draw = () => {
-            requestAnimationFrame(draw); AudioEngine.analyser.getByteFrequencyData(data); ctx.clearRect(0,0,cvs.width,cvs.height);
-            const w = (cvs.width/data.length)*2.5; let x=0; ctx.fillStyle = document.body.getAttribute('data-theme') === 'dark' ? 'rgba(59,130,246,0.2)' : 'rgba(37,99,235,0.2)';
-            for(let i=0; i<data.length; i++) { const h=(data[i]/255)*cvs.height; ctx.fillRect(cvs.width/2+x, (cvs.height-h)/2, w, h); ctx.fillRect(cvs.width/2-x, (cvs.height-h)/2, w, h); x+=w+1; }
-        }; draw();
+
+    startViz() {
+        const cv = $('#audioVisualizer'); const ctx = cv.getContext('2d');
+        const rsz = () => { cv.width = cv.parentElement.offsetWidth; cv.height = cv.parentElement.offsetHeight; };
+        window.onresize = rsz; rsz();
+        const arr = new Uint8Array(AudioSys.analyser.frequencyBinCount);
+        const loop = () => {
+            requestAnimationFrame(loop); AudioSys.analyser.getByteFrequencyData(arr);
+            ctx.clearRect(0,0,cv.width,cv.height);
+            const barW = (cv.width/arr.length)*2.5; let x=0;
+            ctx.fillStyle = document.body.getAttribute('data-theme')=='dark'?'rgba(59,130,246,0.2)':'rgba(37,99,235,0.2)';
+            for(let i=0; i<arr.length; i++) {
+                const h = (arr[i]/255)*cv.height;
+                ctx.fillRect(cv.width/2+x, (cv.height-h)/2, barW, h);
+                ctx.fillRect(cv.width/2-x, (cv.height-h)/2, barW, h);
+                x+=barW+1;
+            }
+        }; loop();
     }
 };
 
-ui.init();
+UI.init();
