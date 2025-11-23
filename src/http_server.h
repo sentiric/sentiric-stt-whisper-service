@@ -17,13 +17,6 @@ struct AppMetrics {
     prometheus::Counter& audio_seconds_processed_total;
 };
 
-// İşlenmiş ses verisi yapısı
-struct DecodedAudio {
-    std::vector<int16_t> pcm_data;
-    int sample_rate = 16000;
-    int channels = 1;
-};
-
 class MetricsServer {
 public:
     MetricsServer(const std::string& host, int port, prometheus::Registry& registry);
@@ -47,9 +40,6 @@ public:
 private:
     void setup_routes();
     
-    // Güvenli WAV parser ve Mono Converter
-    DecodedAudio parse_wav_robust(const std::string& bytes);
-
     httplib::Server svr_;
     std::shared_ptr<SttEngine> engine_;
     AppMetrics& metrics_;

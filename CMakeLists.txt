@@ -20,8 +20,7 @@ find_package(httplib CONFIG REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 find_package(prometheus-cpp CONFIG REQUIRED)
-
-# DÜZELTME: libsamplerate vcpkg içinde "SampleRate" olarak geçer
+find_package(fmt CONFIG REQUIRED)
 find_package(SampleRate CONFIG REQUIRED) 
 
 if(GGML_CUDA)
@@ -90,9 +89,10 @@ target_link_libraries(proto_lib PUBLIC gRPC::grpc++ protobuf::libprotobuf)
 add_executable(stt_service
     src/main.cpp
     src/stt_engine.cpp
-    src/model_manager.cpp # <-- YENİ EKLENDİ
+    src/model_manager.cpp
     src/grpc_server.cpp
     src/http_server.cpp
+    # src/utils.h header only olduğu için buraya eklemeye gerek yok ama IDE için iyi olur
 )
 add_dependencies(stt_service proto_lib)
 
@@ -109,7 +109,8 @@ target_link_libraries(stt_service PRIVATE
     spdlog::spdlog nlohmann_json::nlohmann_json
     httplib::httplib c-ares::cares Threads::Threads
     prometheus-cpp::core prometheus-cpp::pull
-    SampleRate::samplerate # DÜZELTİLDİ
+    SampleRate::samplerate
+    fmt::fmt
 )
 
 if(GGML_CUDA)
@@ -123,4 +124,4 @@ add_executable(stt_cli
 )
 add_dependencies(stt_cli proto_lib)
 target_include_directories(stt_cli PRIVATE src)
-target_link_libraries(stt_cli PRIVATE proto_lib spdlog::spdlog nlohmann_json::nlohmann_json Threads::Threads)
+target_link_libraries(stt_cli PRIVATE proto_lib spdlog::spdlog nlohmann_json::nlohmann_json Threads::Threads fmt::fmt)
