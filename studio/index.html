@@ -2,6 +2,7 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
+    <!-- Viewport Fix: viewport-fit=cover eklendi -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#09090b">
     <title>Sentiric Omni-Studio</title>
@@ -13,33 +14,36 @@
 </head>
 <body data-theme="dark">
 
-<!-- Mobil Header (Sadece mobilde görünür) -->
+<!-- Mobil Header -->
 <header class="mobile-header">
-    <button class="icon-btn" id="mobileMenuBtn"><i class="fas fa-bars"></i></button>
-    <div class="mobile-brand">SENTIRIC <span class="badge">PRO</span></div>
-    <button class="icon-btn" id="mobileMetricsBtn"><i class="fas fa-chart-pie"></i></button>
+    <div class="mobile-left">
+        <button class="icon-btn" id="mobileMenuBtn"><i class="fas fa-bars"></i></button>
+        <div class="mobile-brand">SENTIRIC <span class="badge">PRO</span></div>
+    </div>
+    <div class="mobile-right">
+        <button class="icon-btn theme-toggle"><i class="fas fa-moon"></i></button>
+        <button class="icon-btn" id="mobileMetricsBtn"><i class="fas fa-chart-pie"></i></button>
+    </div>
 </header>
 
-<!-- Backdrop Overlay -->
 <div class="backdrop" id="backdrop"></div>
 
 <div class="app-container">
     
-    <!-- LEFT SIDEBAR: CONTROL -->
+    <!-- LEFT SIDEBAR -->
     <aside class="sidebar left-sidebar" id="leftSidebar">
         <div class="sidebar-header">
             <div class="logo">
                 <div class="logo-icon"><i class="fas fa-wave-square"></i></div>
                 <div class="logo-text">
                     <h1>SENTIRIC</h1>
-                    <span class="badge">v3.0</span>
+                    <span class="badge">v4.0</span>
                 </div>
             </div>
             <button class="close-sidebar-btn" id="closeLeftSidebar"><i class="fas fa-times"></i></button>
         </div>
 
         <div class="sidebar-content">
-            <!-- Input Settings -->
             <div class="setting-group">
                 <label>GİRİŞ & DİL</label>
                 <div class="input-wrapper">
@@ -53,11 +57,10 @@
                 </div>
                 <div class="input-wrapper">
                     <i class="fas fa-magic"></i>
-                    <textarea id="promptInput" placeholder="Prompt (Örn: Sektörel terimler, kişi adları...)"></textarea>
+                    <textarea id="promptInput" placeholder="Prompt (Örn: Sektörel terimler...)"></textarea>
                 </div>
             </div>
 
-            <!-- Toggles -->
             <div class="setting-group">
                 <label>ÖZELLİKLER</label>
                 <div class="toggle-item">
@@ -82,7 +85,6 @@
                 </div>
             </div>
 
-            <!-- Advanced Engine -->
             <div class="setting-group">
                 <label>MOTOR & KİŞİLİK</label>
                 <div class="slider-item">
@@ -101,29 +103,30 @@
                 </div>
                 <div class="slider-item">
                     <div class="slider-header">
-                        <span>VAD Eşiği (Sessizlik)</span>
+                        <span>VAD Eşiği</span>
                         <span id="vadVal" class="val">0.02</span>
                     </div>
                     <input type="range" id="vadRange" min="0.001" max="0.1" step="0.001" value="0.02">
                 </div>
             </div>
         </div>
-
+        
         <div class="sidebar-footer">
             <div class="status-badge" id="connStatus">
-                <span class="dot"></span> Bağlı
+                <span class="dot"></span> Sistem Hazır
             </div>
         </div>
     </aside>
 
     <!-- MAIN STAGE -->
     <main class="stage">
-        <!-- Desktop Toolbar (Hidden on Mobile) -->
         <header class="stage-header desktop-only">
             <div class="header-left">
                 <h2><i class="fas fa-stream"></i> Canlı Akış</h2>
             </div>
             <div class="header-right">
+                <button class="icon-btn theme-toggle" title="Tema Değiştir"><i class="fas fa-moon"></i></button>
+                <div class="divider"></div>
                 <button class="btn btn-sm btn-ghost" onclick="ui.exportTranscript('json')">JSON</button>
                 <button class="btn btn-sm btn-ghost" onclick="ui.exportTranscript('txt')">TXT</button>
                 <div class="divider"></div>
@@ -131,47 +134,50 @@
             </div>
         </header>
 
-        <!-- Transcript Area -->
         <div id="transcriptContainer" class="transcript-content">
             <div class="empty-state">
                 <div class="icon-box"><i class="fas fa-microphone-lines"></i></div>
                 <h3>Kayda Hazır</h3>
-                <p>Yapay zeka konuşmacıları ve duyguları anlık olarak analiz eder.</p>
-                <div class="kbd-hint desktop-only"><kbd>Space</kbd> Kayıt Başlat/Durdur</div>
-            </div>
-        </div>
-
-        <!-- Floating Dock -->
-        <div class="dock-wrapper">
-            <div class="dock-container">
-                <canvas id="visualizerCanvas"></canvas>
-                <div class="dock-controls">
-                    <!-- Tools -->
-                    <div class="dock-side-tools">
-                         <input type="file" id="fileInput" hidden accept="audio/*">
-                         <button class="dock-btn secondary" onclick="$('#fileInput').click()" title="Yükle"><i class="fas fa-upload"></i></button>
-                         <button class="dock-btn secondary mobile-only" onclick="ui.clearChat()"><i class="fas fa-trash"></i></button>
-                    </div>
-
-                    <!-- Main Record -->
-                    <div class="record-group">
-                        <button id="recordBtn" class="record-btn"><i class="fas fa-microphone"></i></button>
-                        <div id="recordTimer" class="timer">00:00</div>
-                    </div>
-
-                    <!-- Mode -->
-                    <div class="dock-side-tools">
-                        <button class="dock-btn secondary" id="handsFreeToggleBtn" title="VAD Modu">
-                            <i class="fas fa-robot"></i>
-                            <div class="active-dot"></div>
-                        </button>
-                    </div>
-                </div>
+                <p>Sentiric AI, konuşmacıları ve duyguları anlık analiz eder.</p>
+                <div class="kbd-hint desktop-only"><kbd>Space</kbd> Başlat / Durdur</div>
             </div>
         </div>
     </main>
 
-    <!-- RIGHT SIDEBAR: METRICS -->
+    <!-- FLOATING DOCK (FIXED POSITION) -->
+    <!-- Bu kısım main stage'in dışında, body'nin doğrudan çocuğu gibi davranacak CSS ile -->
+    <div class="dock-wrapper">
+        <div class="dock-container">
+            <canvas id="visualizerCanvas"></canvas>
+            
+            <div class="dock-controls">
+                <!-- Left Action -->
+                <div class="dock-action-side">
+                    <input type="file" id="fileInput" hidden accept="audio/*">
+                    <button class="dock-btn secondary" onclick="$('#fileInput').click()" title="Yükle"><i class="fas fa-upload"></i></button>
+                </div>
+
+                <!-- Main Record Button -->
+                <div class="record-group">
+                    <button id="recordBtn" class="record-btn">
+                        <i class="fas fa-microphone"></i>
+                        <div class="record-ring"></div>
+                    </button>
+                    <div id="recordTimer" class="timer">00:00</div>
+                </div>
+
+                <!-- Right Action -->
+                <div class="dock-action-side">
+                    <button class="dock-btn secondary" id="handsFreeToggleBtn" title="VAD Modu">
+                        <i class="fas fa-robot"></i>
+                        <div class="active-dot"></div>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT SIDEBAR -->
     <aside class="sidebar right-sidebar" id="rightSidebar">
         <div class="sidebar-header">
             <h3>Analiz Özeti</h3>
@@ -206,10 +212,10 @@
 
             <div class="json-viewer-container">
                 <div class="json-header">
-                    <span>CANLI VERİ ÇIKIŞI</span>
+                    <span>CANLI VERİ</span>
                     <button class="btn-xs" onclick="ui.copyJson()"><i class="far fa-copy"></i></button>
                 </div>
-                <pre id="jsonLog" class="json-content">Waiting...</pre>
+                <pre id="jsonLog" class="json-content">Bekleniyor...</pre>
             </div>
         </div>
     </aside>

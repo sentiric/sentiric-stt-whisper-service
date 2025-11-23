@@ -2,17 +2,50 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
 // =============================================================================
-// 🧠 PRO SPEAKER MANAGER (Weighted Moving Average)
+// 🎨 THEME ENGINE
+// =============================================================================
+const ThemeManager = {
+    init() {
+        // Load saved theme or default to dark
+        const savedTheme = localStorage.getItem('sentiric-theme') || 'dark';
+        document.body.setAttribute('data-theme', savedTheme);
+        this.updateIcons(savedTheme);
+
+        // Bind buttons (Mobile & Desktop)
+        $$('.theme-toggle').forEach(btn => {
+            btn.onclick = () => this.toggle();
+        });
+    },
+
+    toggle() {
+        const current = document.body.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.body.setAttribute('data-theme', next);
+        localStorage.setItem('sentiric-theme', next);
+        this.updateIcons(next);
+    },
+
+    updateIcons(theme) {
+        $$('.theme-toggle i').forEach(icon => {
+            icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+        });
+    }
+};
+
+// =============================================================================
+// 🧠 SPEAKER MANAGER (Anti-Jitter Edition)
 // =============================================================================
 class SpeakerManager {
     constructor() {
-        this.threshold = 0.85; // UI'dan güncellenecek
+        this.threshold = 0.85;
         this.clusters = {}; 
         this.nextId = 0;
+        // Premium Colors
         this.colors = [
             "#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", 
             "#EC4899", "#06B6D4", "#84CC16", "#F97316", "#6366F1"
         ];
+        this.lastSpeakerId = null; // For jitter prevention
     }
 
     setThreshold(val) { this.threshold = parseFloat(val); }
@@ -40,12 +73,19 @@ class SpeakerManager {
             }
         }
 
-        // Threshold check
+        // Hysteresis Logic: Eğer skor eşiği geçiyorsa ama çok yüksek değilse
+        // ve bir önceki konuşmacı bu kişiye yakınsa, geçiş yapma (Jitter önlemi)
+        let finalId = null;
+
         if (bestId && bestScore >= this.threshold) {
             this.updateCluster(bestId, vector, meta);
-            return this.clusters[bestId];
+            finalId = bestId;
+        } else {
+            finalId = this.createCluster(vector, meta).id;
         }
-        return this.createCluster(vector, meta);
+
+        this.lastSpeakerId = finalId;
+        return this.clusters[finalId];
     }
 
     createCluster(vector, meta) {
@@ -64,22 +104,13 @@ class SpeakerManager {
 
     updateCluster(id, vector, meta) {
         const cls = this.clusters[id];
-        
-        // LEARNING RATE LOGIC:
-        // İlk 5 örnekte hızlı öğren (0.5), sonra stabilize ol (0.1).
-        // Bu sayede vektör kayması (drift) engellenir.
-        const learningRate = cls.count < 5 ? 0.3 : 0.05;
+        const learningRate = cls.count < 10 ? 0.2 : 0.05; // Yavaş yavaş oturur
         
         for (let i = 0; i < vector.length; i++) {
             cls.centroid[i] = cls.centroid[i] * (1 - learningRate) + vector[i] * learningRate;
         }
         cls.count++;
-        
-        // Cinsiyet kararlılığı (Hysteresis)
-        if (meta.gender && meta.gender !== "?") {
-            // Basitçe son geleni alıyoruz ama buraya da sayaç konulabilir
-            cls.gender = meta.gender; 
-        }
+        if (meta.gender && meta.gender !== "?") cls.gender = meta.gender;
     }
 
     rename(id, newName) {
@@ -93,6 +124,7 @@ class SpeakerManager {
     reset() {
         this.clusters = {};
         this.nextId = 0;
+        this.lastSpeakerId = null;
     }
 }
 
@@ -109,9 +141,13 @@ const AudioEngine = {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const source = this.ctx.createMediaStreamSource(stream);
-        this.analyser = this.ctx.createAnalyser(); this.analyser.fftSize = 256; this.analyser.smoothingTimeConstant = 0.5;
+        this.analyser = this.ctx.createAnalyser(); 
+        this.analyser.fftSize = 256; 
+        this.analyser.smoothingTimeConstant = 0.5;
         this.scriptNode = this.ctx.createScriptProcessor(4096, 1, 1);
-        source.connect(this.analyser); this.analyser.connect(this.scriptNode); this.scriptNode.connect(this.ctx.destination);
+        source.connect(this.analyser); 
+        this.analyser.connect(this.scriptNode); 
+        this.scriptNode.connect(this.ctx.destination);
         this.scriptNode.onaudioprocess = (e) => this.process(e);
         ui.startVisualizer();
     },
@@ -152,7 +188,6 @@ const API = {
         fd.append('translate', $('#translateToggle').checked);
         fd.append('diarization', $('#diarizationToggle').checked);
         fd.append('temperature', $('#tempRange').value);
-        // Cluster Threshold backend'e gitmez, front'ta işlenir ama ileride lazım olabilir diye tutuyoruz
         
         const tempId = ui.addTempMessage();
         try {
@@ -170,25 +205,24 @@ const API = {
 };
 
 // =============================================================================
-// 🎨 UI CONTROLLER (MOBILE & DESKTOP)
+// 🎨 UI CONTROLLER
 // =============================================================================
 const state = { isHandsFree: false, lastSpeechTime: 0, isSpeaking: false, startTime: 0, timer: null };
 
 const ui = {
     init() {
-        // Mobile Sidebar Toggles
+        ThemeManager.init();
+
         $('#mobileMenuBtn').onclick = () => this.toggleSidebar('left');
         $('#mobileMetricsBtn').onclick = () => this.toggleSidebar('right');
         $('#closeLeftSidebar').onclick = () => this.closeSidebars();
         $('#closeRightSidebar').onclick = () => this.closeSidebars();
         $('#backdrop').onclick = () => this.closeSidebars();
 
-        // Controls
         $('#recordBtn').onclick = () => this.toggleRecord();
         $('#handsFreeToggleBtn').onclick = () => this.toggleHandsFree();
         $('#fileInput').onchange = (e) => { if(e.target.files[0]) API.transcribe(e.target.files[0], 0); };
         
-        // Live Sliders
         $('#tempRange').oninput = (e) => $('#tempVal').innerText = e.target.value;
         $('#vadRange').oninput = (e) => $('#vadVal').innerText = e.target.value;
         $('#clusterThreshold').oninput = (e) => {
@@ -196,7 +230,6 @@ const ui = {
             speakerMgr.setThreshold(e.target.value);
         };
 
-        // Keyboard Shortcut
         document.addEventListener('keydown', (e) => { 
             if (e.code === 'Space' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') { 
                 e.preventDefault(); this.toggleRecord(); 
@@ -293,7 +326,7 @@ const ui = {
     },
     addTempMessage() {
         const id = 'temp-' + Date.now();
-        $('#transcriptContainer').insertAdjacentHTML('beforeend', `<div id="${id}" class="timeline-block" style="opacity:0.5"><div class="speaker-avatar"><i class="fas fa-circle-notch fa-spin"></i></div><div class="speaker-content"><div class="bubble">Analiz ediliyor...</div></div></div>`);
+        $('#transcriptContainer').insertAdjacentHTML('beforeend', `<div id="${id}" class="timeline-block" style="opacity:0.5"><div class="speaker-avatar"><i class="fas fa-circle-notch fa-spin"></i></div><div class="speaker-content"><div class="bubble">...</div></div></div>`);
         $('#transcriptContainer').scrollTop = $('#transcriptContainer').scrollHeight;
         return id;
     },
@@ -305,7 +338,7 @@ const ui = {
         $('#jsonLog').innerText = JSON.stringify(data, null, 2);
     },
     copyJson() { navigator.clipboard.writeText($('#jsonLog').innerText); },
-    clearChat() { $('#transcriptContainer').innerHTML = '<div class="empty-state"><div class="icon-box"><i class="fas fa-microphone-lines"></i></div><h3>Temizlendi</h3></div>'; speakerMgr.reset(); },
+    clearChat() { $('#transcriptContainer').innerHTML = '<div class="empty-state"><div class="icon-box"><i class="fas fa-microphone-lines"></i></div><h3>Kayda Hazır</h3></div>'; speakerMgr.reset(); },
     exportTranscript(type) {
         const lines = []; $$('.timeline-block').forEach(grp => { if(grp.id.startsWith('temp'))return; const name=grp.querySelector('.speaker-name').innerText; const text=grp.querySelector('.bubble').innerText.replace(/\n/g,' '); lines.push(type==='json'?{speaker:name,text}:`[${name}]: ${text}`); });
         const blob=new Blob([type==='json'?JSON.stringify(lines,null,2):lines.join('\n')],{type:'text/plain'});
@@ -318,7 +351,7 @@ const ui = {
         const data = new Uint8Array(AudioEngine.analyser.frequencyBinCount);
         const draw = () => {
             requestAnimationFrame(draw); AudioEngine.analyser.getByteFrequencyData(data); ctx.clearRect(0,0,cvs.width,cvs.height);
-            const w = (cvs.width/data.length)*2.5; let x=0; ctx.fillStyle='rgba(59,130,246,0.3)';
+            const w = (cvs.width/data.length)*2.5; let x=0; ctx.fillStyle = document.body.getAttribute('data-theme') === 'dark' ? 'rgba(59,130,246,0.2)' : 'rgba(37,99,235,0.2)';
             for(let i=0; i<data.length; i++) { const h=(data[i]/255)*cvs.height; ctx.fillRect(cvs.width/2+x, (cvs.height-h)/2, w, h); ctx.fillRect(cvs.width/2-x, (cvs.height-h)/2, w, h); x+=w+1; }
         }; draw();
     }
