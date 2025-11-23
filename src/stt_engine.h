@@ -17,7 +17,7 @@ struct TokenData {
     int64_t t1;    
 };
 
-// İstek bazında özelleştirilebilir parametreler (Pro Özellikler)
+// İstek bazında özelleştirilebilir parametreler
 struct RequestOptions {
     std::string language = "";      // Boş ise auto-detect
     std::string prompt = "";        // Context/İpucu
@@ -47,7 +47,7 @@ public:
 
     bool is_ready() const;
 
-    // Yeni İmza: Parametreler struct içinde toplanmıştır
+    // Zero-Copy Optimized Interface
     std::vector<TranscriptionResult> transcribe(
         const std::vector<float>& pcmf32, 
         int input_sample_rate,
@@ -61,8 +61,12 @@ public:
     );
 
 private:
-    std::vector<float> resample_audio(const std::vector<float>& input, int src_rate, int target_rate);
-    bool is_speech_detected(const std::vector<float>& pcmf32);
+    // Helper: Resample audio and return a new vector.
+    // Optimization: Returns empty vector if no resampling needed (handled by caller)
+    std::vector<float> resample_audio(const float* input, size_t input_size, int src_rate, int target_rate);
+    
+    // Updated: Takes pointer and size for zero-copy slice checks
+    bool is_speech_detected(const float* pcm, size_t n_samples);
 
     struct whisper_state* acquire_state();
     void release_state(struct whisper_state* state);

@@ -37,6 +37,7 @@ SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
         vparams.use_gpu = false; 
         vad_ctx_ = whisper_vad_init_from_file_with_params(vad_path.c_str(), vparams);
         if (vad_ctx_) spdlog::info("✅ Native Silero VAD loaded successfully (CPU Mode).");
+        else spdlog::warn("⚠️ Failed to load VAD model at {}. VAD will be disabled.", vad_path);
     }
 }
 
@@ -62,28 +63,36 @@ void SttEngine::release_state(struct whisper_state* state) {
     pool_cv_.notify_one();
 }
 
-std::vector<float> SttEngine::resample_audio(const std::vector<float>& input, int src_rate, int target_rate) {
-    if (src_rate == target_rate || input.empty()) return input;
+std::vector<float> SttEngine::resample_audio(const float* input, size_t input_size, int src_rate, int target_rate) {
+    if (src_rate == target_rate || input_size == 0) return {};
+    
     double ratio = (double)target_rate / (double)src_rate;
-    long output_frames = (long)(input.size() * ratio) + 100; 
+    long output_frames = (long)(input_size * ratio) + 100; 
     std::vector<float> output(output_frames);
+    
     SRC_DATA src_data;
-    src_data.data_in = input.data();
-    src_data.input_frames = (long)input.size();
+    src_data.data_in = input;
+    src_data.input_frames = (long)input_size;
     src_data.data_out = output.data();
     src_data.output_frames = output_frames;
     src_data.src_ratio = ratio;
     src_data.end_of_input = 0; 
+    
     int error = src_simple(&src_data, SRC_SINC_FASTEST, 1); 
-    if (error) return input; 
+    if (error) {
+        spdlog::error("Resampling failed: {}", src_strerror(error));
+        return {};
+    }
+    
     output.resize(src_data.output_frames_gen);
     return output;
 }
 
-bool SttEngine::is_speech_detected(const std::vector<float>& pcmf32) {
+bool SttEngine::is_speech_detected(const float* pcm, size_t n_samples) {
     if (!vad_ctx_) return true; 
     std::lock_guard<std::mutex> lock(vad_mutex_);
-    return whisper_vad_detect_speech(vad_ctx_, pcmf32.data(), (int)pcmf32.size());
+    // Whisper VAD API expects raw float buffer
+    return whisper_vad_detect_speech(vad_ctx_, pcm, (int)n_samples);
 }
 
 std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
@@ -91,10 +100,15 @@ std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
     int input_sample_rate,
     const RequestOptions& options
 ) {
-    std::vector<float> pcmf32(pcm16.size());
-    for (size_t i = 0; i < pcm16.size(); ++i) {
-        pcmf32[i] = static_cast<float>(pcm16[i]) / 32768.0f;
+    // Optimization: Reserve memory to avoid reallocations during loop
+    std::vector<float> pcmf32;
+    pcmf32.reserve(pcm16.size());
+    
+    // Vectorized friendly loop (modern compilers optimize this well)
+    for (const auto& sample : pcm16) {
+        pcmf32.push_back(static_cast<float>(sample) / 32768.0f);
     }
+    
     return transcribe(pcmf32, input_sample_rate, options);
 }
 
@@ -105,21 +119,34 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
 ) {
     if (!ctx_) return {};
 
-    std::vector<float> processed_audio;
+    const float* pcm_ptr = pcmf32.data();
+    size_t pcm_size = pcmf32.size();
+    
+    // Holds ownership of resampled data if needed
+    std::vector<float> resampled_buffer; 
+
+    // 1. Resampling Check (Zero-Copy if already 16kHz)
     if (input_sample_rate != 16000) {
-        processed_audio = resample_audio(pcmf32, input_sample_rate, 16000);
-    } else {
-        processed_audio = pcmf32;
+        resampled_buffer = resample_audio(pcmf32.data(), pcmf32.size(), input_sample_rate, 16000);
+        if (!resampled_buffer.empty()) {
+            pcm_ptr = resampled_buffer.data();
+            pcm_size = resampled_buffer.size();
+        } else {
+             spdlog::warn("Resampling returned empty/failed. Proceeding with original audio (might fail).");
+        }
     }
 
-    if (settings_.enable_vad && processed_audio.size() > (16000 * 0.2)) { 
-        if (!is_speech_detected(processed_audio)) {
+    // 2. VAD Pre-Check (Efficiency)
+    // Only check if VAD is enabled AND audio is long enough (>0.2s)
+    if (settings_.enable_vad && pcm_size > (16000 * 0.2)) { 
+        if (!is_speech_detected(pcm_ptr, pcm_size)) {
+            // Early exit for silence - saves massive GPU/CPU resources
             TranscriptionResult empty_res;
             empty_res.text = "";
             empty_res.language = "unknown";
             empty_res.prob = 0.0f;
             empty_res.t0 = 0;
-            empty_res.t1 = (int64_t)((double)processed_audio.size() / 16.0); 
+            empty_res.t1 = (int64_t)((double)pcm_size / 16.0); 
             empty_res.speaker_turn_next = false;
             return {empty_res}; 
         }
@@ -127,7 +154,7 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
 
     struct whisper_state* state = acquire_state();
 
-    // Strateji Belirleme (Config vs Request)
+    // 3. Strategy & Params
     int active_beam_size = (options.beam_size >= 0) ? options.beam_size : settings_.beam_size;
     float active_temp = (options.temperature >= 0.0f) ? options.temperature : settings_.temperature;
     int active_best_of = (options.best_of >= 0) ? options.best_of : settings_.best_of;
@@ -143,9 +170,9 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.suppress_nst = settings_.suppress_nst; 
     wparams.no_speech_thold = settings_.no_speech_threshold; 
     
-    // --- REQUEST OVERRIDES ---
-    wparams.translate = options.translate; // Request öncelikli (default false)
-    wparams.tdrz_enable = options.enable_diarization; // Request öncelikli
+    // Request Overrides
+    wparams.translate = options.translate;
+    wparams.tdrz_enable = options.enable_diarization;
 
     std::string target_lang = options.language;
     if (target_lang.empty()) target_lang = settings_.language;
@@ -162,11 +189,14 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     } else {
         wparams.greedy.best_of = active_best_of;
     }
+    
     wparams.entropy_thold = 2.40f;
     wparams.logprob_thold = settings_.logprob_threshold;
     wparams.n_threads = settings_.n_threads;
 
-    int ret = whisper_full_with_state(ctx_, state, wparams, processed_audio.data(), processed_audio.size());
+    // 4. Inference (Blocking)
+    // Using pcm_ptr avoids copying the whole buffer again
+    int ret = whisper_full_with_state(ctx_, state, wparams, pcm_ptr, (int)pcm_size);
     
     std::vector<TranscriptionResult> results;
     
@@ -201,7 +231,7 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             results.push_back({std::string(text), target_lang, avg_prob, t0, t1, speaker_turn, tokens});
         }
     } else {
-        spdlog::error("Whisper processing failed.");
+        spdlog::error("Whisper processing failed with error code: {}", ret);
     }
 
     release_state(state);
