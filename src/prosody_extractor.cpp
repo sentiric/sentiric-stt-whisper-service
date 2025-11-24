@@ -31,6 +31,11 @@ static float soft_norm(float val, float min_v, float max_v) {
     return std::max(0.0f, std::min(1.0f, norm));
 }
 
+// Yumuşak geçiş fonksiyonu (Sigmoid benzeri)
+static float sigmoid(float x, float center, float slope) {
+    return 1.0f / (1.0f + std::exp(-slope * (x - center)));
+}
+
 // --- Ana Fonksiyon ---
 
 AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sample_rate, const ProsodyOptions& opts) {
@@ -61,8 +66,6 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     float last_rms = 0;
 
     // --- PARAMETRİK LPF (Low Pass Filter) ---
-    // Yüksek frekanslı dijital gürültüyü (hiss) temizler,
-    // böylece ZCR sadece ana ses dalgalarını sayar.
     float lpf_val = 0.0f;
     const float lpf_alpha = opts.lpf_alpha; 
 
@@ -70,7 +73,7 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
         float r0 = 0;
         float max_amp = 0.0f;
         
-        // Stack üzerinde küçük bir buffer (Heap allocation'dan kaçınmak için)
+        // Stack üzerinde küçük bir buffer
         float filtered_frame[1600]; 
         int safe_frame_size = std::min(frame_shift, 1600);
 
@@ -90,13 +93,12 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
         float rms = std::sqrt(r0 / safe_frame_size);
         rmses.push_back(rms);
 
-        // Konuşma Hızı için Tepe Noktası Sayımı (Basit Syllable Counting)
+        // Konuşma Hızı için Tepe Noktası Sayımı
         if (rms > 0.05f && last_rms <= 0.05f) peak_count++;
         last_rms = rms;
 
         // 2. Zero Crossing Rate (Center Clipped)
-        // Gürültüyü "sıfır geçişi" olarak saymamak için eşik değeri.
-        float clipping_threshold = std::max(0.002f, rms * 0.15f); // Eşik biraz artırıldı
+        float clipping_threshold = std::max(0.002f, rms * 0.15f); 
 
         int cycles = 0;
         bool is_positive = false; 
@@ -116,10 +118,9 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
             } else {
                 if (is_positive && val < -clipping_threshold) {
                     is_positive = false; 
-                    cycles++; // Bir tam dalga bitti (Negatife geçti)
+                    cycles++; 
                 } else if (!is_positive && val > clipping_threshold) {
                     is_positive = true; 
-                    // Pozitife geçti (Cycle başlangıcı)
                 }
             }
         }
@@ -127,18 +128,16 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
         zcrs.push_back(zcr_val);
 
         // 3. Pitch Tahmini (ZCR Bazlı)
-        if (rms > 0.015f && cycles > 0) { // Sessiz kısımları atla
+        if (rms > 0.015f && cycles > 0) {
             float duration = static_cast<float>(frame_shift) / sample_rate;
             float estimated_f0 = cycles / duration; 
 
-            // İnsan sesi aralığı (Dinamik)
             if(estimated_f0 >= opts.min_pitch && estimated_f0 <= opts.max_pitch) {
                 f0s.push_back(estimated_f0);
             }
         }
 
-        // 4. Spectral Centroid (Parlaklık/Tını)
-        // Yüksek frekanslı değişimlerin ağırlıklı ortalaması
+        // 4. Spectral Centroid
         float power = 0, weighted = 0;
         for (int k = 1; k < safe_frame_size; ++k) {
             float diff = std::abs(pcm_data[i + k] - pcm_data[i + k - 1]);
@@ -150,7 +149,7 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     }
 
     // --- İstatistiklerin Hesaplanması ---
-    out.pitch_mean = vector_median(f0s); // Median, outlier'ları eler
+    out.pitch_mean = vector_median(f0s);
     out.pitch_std  = f0s.empty() ? 0.0f : vector_stdev(f0s, vector_mean(f0s));
     out.energy_mean = rmses.empty() ? 0.01f : vector_mean(rmses);
     out.energy_std  = rmses.empty() ? 0.00f : vector_stdev(rmses, out.energy_mean);
@@ -158,61 +157,73 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     out.zero_crossing_rate = zcrs.empty() ? 0.1f : vector_mean(zcrs);
 
     // -------------------------------------------------------------------------
-    // 🛠️ HEURISTIC: AGRESİF HARMONİK DÜZELTME (OCTAVE ERROR FIX)
+    // 🛠️ HEURISTIC V2 (TUNED): HARMONİK VE OKTAV KONTROLÜ
     // -------------------------------------------------------------------------
-    // Sorun: Erkek seslerinin 2. harmoniği (örn: 100Hz yerine 200Hz) algılanıyor.
-    // Çözüm: Ses "koyu/kalın" tınlıysa (Düşük Spectral Centroid) ama Pitch yüksekse,
-    // bu bir hatadır. Frekansı zorla yarıya indir.
     
-    if (out.pitch_mean > opts.gender_threshold) {
-         // Kural A: Spectral Centroid çok düşükse (Erkek tınısı karakteristik özellik)
-         // Eşik değeri 90.0f olarak ayarlandı (Daha önce 75 idi, artırıldı)
-         if (out.spectral_centroid < 90.0f) {
-             out.pitch_mean *= 0.5f; 
-         }
-         // Kural B: Yüksek enerjili (bağıran) erkek sesi
-         // Enerji yüksekken spektrum biraz açılabilir ama pitch hala "sınırdaysa" düzelt.
-         else if (out.energy_mean > 0.15f && out.pitch_mean < 230.0f && out.spectral_centroid < 110.0f) {
-             out.pitch_mean *= 0.5f;
-         }
+    // Eşik değerini 90Hz'den 65Hz'e düşürdük. 
+    // Sadece ÇOK boğuk (Deep Male Voice) seslerde devreye girsin.
+    // Kadın sesleri genelde Spectral Centroid > 70Hz verir, bu yüzden etkilenmezler.
+    bool potential_octave_error = (out.pitch_mean > opts.gender_threshold) && 
+                                  (out.spectral_centroid < 65.0f);
+
+    if (potential_octave_error) {
+         out.pitch_mean *= 0.5f; 
     }
-    // -------------------------------------------------------------------------
+    
+    // Bağıran erkek sesi kontrolü (Yüksek enerji, orta pitch, düşük tını)
+    else if (out.energy_mean > 0.15f && out.pitch_mean < 230.0f && out.spectral_centroid < 100.0f) {
+         out.pitch_mean *= 0.5f;
+    }
 
     float duration_sec = (float)n_samples / sample_rate;
     float speech_rate = (duration_sec > 0) ? (float)peak_count / duration_sec : 0.0f; 
 
-    // --- Sınıflandırma Kuralları (Classification) ---
+    // --- SINIFLANDIRMA KURALLARI (TUNED) ---
     
-    // 1. Cinsiyet (Düzeltilmiş Pitch ile)
+    // 1. Cinsiyet: Hibrit Puanlama (Pitch + Tını)
     if (out.pitch_mean == 0.0f) {
         out.gender_proxy = "?";
     } else {
-        out.gender_proxy = (out.pitch_mean > opts.gender_threshold) ? "F" : "M";
+        float gender_score = 0.0f;
+        // Pitch katkısı
+        gender_score += (out.pitch_mean > opts.gender_threshold) ? 1.0f : -1.0f;
+        // Tını katkısı (Parlak sesler kadına yakındır)
+        gender_score += (out.spectral_centroid > 75.0f) ? 0.5f : -0.5f;
+        
+        out.gender_proxy = (gender_score > 0) ? "F" : "M";
     }
 
-    // 2. Arousal (Uyarılma) = Enerji + Hız
-    float norm_energy = soft_norm(out.energy_mean, 0.01f, 0.25f);
-    float norm_rate = soft_norm(speech_rate, 2.0f, 8.0f);
-    out.arousal = (norm_energy * 0.6f) + (norm_rate * 0.4f);
-
-    // 3. Valence (Pozitiflik) = Pitch + Parlaklık
+    // 2. Valence (Mutluluk) Kalibrasyonu
+    // "Neutral Bias" eklendi (+0.15). Artık herkesi üzgün sanmayacak.
     float norm_pitch = soft_norm(out.pitch_mean, 80.0f, 320.0f);
-    float norm_bright = soft_norm(out.spectral_centroid, 20.0f, 180.0f);
-    out.valence = ((norm_pitch * 0.5f) + (norm_bright * 0.5f)) * 2.0f - 1.0f;
+    float norm_bright = soft_norm(out.spectral_centroid, 30.0f, 200.0f);
+    
+    out.valence = ((norm_pitch * 0.4f) + (norm_bright * 0.6f)) * 2.0f - 1.0f;
+    out.valence += 0.15f; // Bias Correction
 
-    // 4. Basit Duygu Etiketleme
-    if (out.arousal > 0.65f) out.emotion_proxy = (out.valence > 0.1f) ? "excited" : "angry";
-    else if (out.arousal < 0.35f) out.emotion_proxy = (out.valence < -0.2f) ? "sad" : "neutral";
-    else out.emotion_proxy = "neutral";
+    // 3. Arousal (Enerji)
+    float norm_energy = soft_norm(out.energy_mean, 0.02f, 0.20f);
+    float norm_rate = soft_norm(speech_rate, 2.0f, 9.0f);
+    out.arousal = (norm_energy * 0.7f) + (norm_rate * 0.3f);
+
+    // 4. Duygu Etiketleme
+    if (out.arousal > 0.60f) {
+        out.emotion_proxy = (out.valence > 0.0f) ? "excited" : "angry";
+    } else if (out.arousal < 0.30f) {
+        // Eşik değerleri biraz daha esnek
+        out.emotion_proxy = (out.valence < -0.3f) ? "sad" : "neutral";
+    } else {
+        out.emotion_proxy = "neutral";
+    }
 
     // 5. Konuşmacı Vektörü (Diarization için)
     out.speaker_vec.resize(8);
-    out.speaker_vec[0] = soft_norm(out.pitch_mean, 50.0f, 350.0f); // Düzeltilmiş Pitch
-    out.speaker_vec[1] = soft_norm(out.pitch_std, 5.0f, 80.0f);         
+    out.speaker_vec[0] = soft_norm(out.pitch_mean, 50.0f, 300.0f);
+    out.speaker_vec[1] = soft_norm(out.pitch_std, 5.0f, 100.0f);         
     out.speaker_vec[2] = soft_norm(out.energy_mean, 0.0f, 0.3f);        
     out.speaker_vec[3] = soft_norm(out.spectral_centroid, 0.0f, 250.0f); 
     out.speaker_vec[4] = soft_norm(out.zero_crossing_rate, 0.0f, 0.5f); 
-    out.speaker_vec[5] = soft_norm(speech_rate, 1.0f, 10.0f);           
+    out.speaker_vec[5] = soft_norm(speech_rate, 1.0f, 12.0f);           
     out.speaker_vec[6] = out.arousal;                                   
     out.speaker_vec[7] = (out.valence + 1.0f) / 2.0f;                   
 

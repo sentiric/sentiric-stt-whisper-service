@@ -20,7 +20,7 @@ struct Settings {
 
     // --- VAD Settings ---
     std::string vad_model_filename = "ggml-silero-vad.bin"; 
-    std::string vad_model_url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin";
+    std::string vad_model_url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin";
     
     bool enable_vad = true;
     float vad_threshold = 0.5f;        

@@ -75,7 +75,6 @@ const SysMon = new SystemMonitor();
 // 🧠 TEMPLATES
 // =============================================================================
 const Templates = {
-  // prompt kullanımı yeniden daha doğru değerlendirmeliyiz.
   general: "",
   medical: "tıbbi terminoloji: anamnez, tanı, tedavi, farmakoloji terimleri",
   legal: "hukuki terimler: davacı, davalı, hüküm, sözleşme",
@@ -140,7 +139,6 @@ const AudioSys = {
     ctx: null, analyser: null, script: null, 
     chunks: [], isRec: false, timer: null, startT: 0, handsFree: false, lastSpk: 0, isSpk: false,
     wakeLock: null,
-    // YENİ VAD AYARLARI
     vadThreshold: 0.02,
     vadPauseTime: 1500,
 
@@ -168,7 +166,6 @@ const AudioSys = {
         if(this.isRec) this.chunks.push(this.floatTo16(inData));
         
         if(this.handsFree) { 
-            // Dinamik UI Ayarlarını Kullan
             const th = this.vadThreshold; 
             const pt = this.vadPauseTime;
             
@@ -210,15 +207,10 @@ const UI = {
         $('#closeLeft').onclick = () => tog('Left', false); $('#closeRight').onclick = () => tog('Right', false);
         $$('.sidebar-overlay').forEach(o => o.onclick = () => { tog('Left', false); tog('Right', false); });
 
-        // DÜZELTİLDİ: bind fonksiyonu çağrıları artık güvenli
         this.bind('#tempRange', '#tempDisplay', 'stt_temp', "0.0");
         this.bind('#lpfRange', '#lpfDisplay', 'stt_lpf', "0.05");
         this.bind('#pitchGateRange', '#pitchGateDisplay', 'stt_pitch_gate', "165");
-        
-        // Speaker Cluster Callback
         this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', "0.85", (v) => Speaker.setThreshold(v));
-
-        // YENİ: VAD AYARLARI
         this.bind('#vadThRange', '#vadThDisplay', 'stt_vad_th', "0.02", (v) => AudioSys.vadThreshold = parseFloat(v));
         this.bind('#vadPauseRange', '#vadPauseDisplay', 'stt_vad_pause', "1500", (v) => AudioSys.vadPauseTime = parseInt(v));
 
@@ -249,7 +241,6 @@ const UI = {
         const btn = $(`#${mode}Toggle`); if(btn) btn.classList.toggle('active', ViewModes[mode]);
     },
 
-    // DÜZELTME: bind fonksiyonu hataya karşı korumalı
     bind(inpId, dispId, key, defValue, callback) {
         const el = $(inpId);
         const display = $(dispId);
@@ -261,7 +252,6 @@ const UI = {
         el.value = val;
         if(display) display.innerText = val;
         
-        // Init sırasında callback çalıştır
         if (typeof callback === 'function') callback(val);
 
         el.oninput = e => { 
@@ -298,11 +288,8 @@ const UI = {
     toggleVad() {
         AudioSys.handsFree = !AudioSys.handsFree;
         const btn = $('#vadBtn');
-        
-        // GÖRSEL GÜNCELLEME
         if (AudioSys.handsFree) {
             btn.classList.add('active');
-            // İkon değişimi (Robot -> Dalga)
             btn.innerHTML = '<div class="active-dot"></div><i class="fas fa-wave-square"></i>';
             AudioSys.haptic([50]);
             if(!AudioSys.ctx) AudioSys.init();
@@ -328,27 +315,20 @@ const UI = {
             const t0 = Date.now();
             const r = await fetch('/v1/transcribe', { method: 'POST', body: fd });
             const d = await r.json();
-            
-            this.removeLoading(tempId); // Yükleniyor balonunu sil
+            this.removeLoading(tempId);
             
             if(r.ok) {
                 const url = URL.createObjectURL(blob);
-                
-                // KONTROL: Eğer segment yoksa veya hepsi filtrelendiyse
                 if (!d.segments || d.segments.length === 0) {
-                    this.showToast("⚠️ Ses algılandı ama metin çözülemedi (Sessizlik/Gürültü).");
+                    this.showToast("⚠️ Ses algılandı ama metin çözülemedi.");
                     return;
                 }
-
                 const renderedCount = this.render(d, durMs, url);
-                
-                // Eğer render fonksiyonu da (halüsinasyon filtresi yüzünden) hiçbir şey basmadıysa
                 if (renderedCount === 0) {
                     this.showToast("🚫 Sonuç filtrelendi (Gürültü/Halüsinasyon).");
                 } else {
                     this.updateMetrics(durMs, Date.now()-t0, d);
                 }
-
             } else { 
                 this.showToast("❌ API Hatası: " + (d.error || "Bilinmiyor")); 
             }
@@ -364,7 +344,6 @@ const UI = {
         const a = document.createElement('a'); a.href = url; a.download = `rec_${Date.now()}.wav`; a.click();
     },
 
-    // Basit bir Toast Bildirim Fonksiyonu
     showToast(msg) {
         const t = document.createElement('div');
         t.className = 'toast-msg';
@@ -384,9 +363,7 @@ const UI = {
         const c = $('#transcriptFeed');
         $('.empty-placeholder')?.remove();
         
-        // Eğer segment yoksa text'i segment yap
         const segs = data.segments && data.segments.length ? data.segments : (data.text ? [{text: data.text, start:0, speaker_vec:[], gender:'?', words:[]}] : []);
-        
         let renderedCount = 0;
 
         segs.forEach((seg, idx) => {
@@ -402,14 +379,14 @@ const UI = {
 
             let textHtml = "";
             if (seg.words && seg.words.length > 0) {
-                // TOKEN BOŞLUK DÜZELTMESİ v2
-                // Whisper tokenları bazen başında boşluk içerir (" mer", "ha", "ba").
-                // Bazen içermez. Biz manuel boşluk eklemek yerine
-                // token'ın kendi boşluğunu kullanacağız (clean_utf8 bunu bozmamalı).
-                // join("") kullanarak tokenları ham haliyle birleştiriyoruz.
                 textHtml = seg.words.map(w => {
                     let cls = w.probability < 0.5 ? "low" : (w.probability < 0.75 ? "mid" : "high");
-                    return `<span class="w" data-start="${w.start}" data-end="${w.end}" data-conf="${cls}">${w.word}</span>`;
+                    // --- KARAOKE FİX: MİNİMUM SÜRE GARANTİSİ ---
+                    let s = parseFloat(w.start);
+                    let e = parseFloat(w.end);
+                    if (e - s < 0.2) e = s + 0.25; 
+                    
+                    return `<span class="w" data-start="${s}" data-end="${e}" data-conf="${cls}">${w.word}</span>`;
                 }).join(""); 
             } else {
                 textHtml = seg.text;
@@ -449,27 +426,49 @@ const UI = {
 
     play(el, url, offset) {
         const i = el.querySelector('i');
+        
         if(window.audio) {
-            window.audio.pause(); window.playBtn.className='fas fa-play';
-            if(window.karaokeInterval) clearInterval(window.karaokeInterval);
+            window.audio.pause(); 
+            if(window.playBtn) window.playBtn.className='fas fa-play';
+            if(window.karaokeFrame) cancelAnimationFrame(window.karaokeFrame);
             $$('.w.active-word').forEach(e => e.classList.remove('active-word'));
             if(window.playBtn === i) { window.audio = null; return; }
         }
-        window.audio = new Audio(url); window.playBtn = i; i.className = 'fas fa-pause'; window.audio.play(); 
-        const row = el.closest('.speaker-row'); const words = row ? Array.from(row.querySelectorAll('.w')) : [];
+
+        window.audio = new Audio(url); 
+        window.playBtn = i; 
+        i.className = 'fas fa-pause'; 
+        
+        window.audio.onerror = () => { UI.showToast("Ses dosyası oynatılamadı."); i.className = 'fas fa-play'; };
+        window.audio.play(); 
+
+        const row = el.closest('.speaker-row'); 
+        const words = row ? Array.from(row.querySelectorAll('.w')) : [];
+
+        // --- KARAOKE FİX: RequestAnimationFrame ---
         if (ViewModes.karaoke && words.length > 0) {
-            window.karaokeInterval = setInterval(() => {
-                if(!window.audio) return;
+            const checkKaraoke = () => {
+                if(!window.audio || window.audio.paused) return;
                 const localT = window.audio.currentTime;
                 words.forEach(w => {
-                    const s = parseFloat(w.getAttribute('data-start')); const e = parseFloat(w.getAttribute('data-end'));
-                    if (localT >= s && localT <= e) w.classList.add('active-word'); else w.classList.remove('active-word');
+                    const s = parseFloat(w.getAttribute('data-start')); 
+                    const e = parseFloat(w.getAttribute('data-end'));
+                    if (localT >= s && localT <= e) {
+                        if (!w.classList.contains('active-word')) w.classList.add('active-word');
+                    } else {
+                        w.classList.remove('active-word');
+                    }
                 });
-            }, 50);
+                window.karaokeFrame = requestAnimationFrame(checkKaraoke);
+            };
+            window.karaokeFrame = requestAnimationFrame(checkKaraoke);
         }
+
         window.audio.onended = () => {
-            i.className = 'fas fa-play'; if(window.karaokeInterval) clearInterval(window.karaokeInterval);
-            $$('.w.active-word').forEach(e => e.classList.remove('active-word')); window.audio = null;
+            i.className = 'fas fa-play'; 
+            if(window.karaokeFrame) cancelAnimationFrame(window.karaokeFrame);
+            $$('.w.active-word').forEach(e => e.classList.remove('active-word')); 
+            window.audio = null;
         };
     },
     showLoading() {
