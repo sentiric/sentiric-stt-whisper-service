@@ -4,32 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#09090b">
-    <title>Sentiric Omni-Studio v7</title>
+    <title>Sentiric Omni-Studio v8 Ultra</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
-    <style>
-        /* Accordion & Overlay Fixes */
-        .accordion-header {
-            width: 100%; text-align: left; background: var(--bg-input); border: 1px solid var(--border);
-            padding: 10px 12px; font-size: 11px; font-weight: 700; color: var(--text-muted);
-            border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 8px; transition: 0.2s;
-        }
-        .accordion-header:hover { background: var(--border); color: var(--text-main); }
-        .accordion-content { display: none; padding: 0 4px; animation: slideDown 0.3s ease; }
-        .accordion-content.active { display: block; }
-        @keyframes slideDown { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
-        
-        .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 45; opacity: 0; pointer-events: none; transition: 0.3s; backdrop-filter: blur(4px); }
-        .sidebar-overlay.active { opacity: 1; pointer-events: auto; }
-    </style>
 </head>
 <body data-theme="dark">
 
 <nav class="mobile-nav">
     <button class="nav-btn" id="mobLeftBtn"><i class="fas fa-sliders-h"></i></button>
-    <div class="nav-brand">SENTIRIC <span class="badge">PRO</span></div>
+    <div class="nav-brand">SENTIRIC <span class="badge">ULTRA</span></div>
     <div class="nav-actions">
         <button class="nav-btn theme-toggle"><i class="fas fa-moon"></i></button>
         <button class="nav-btn" id="mobRightBtn"><i class="fas fa-chart-bar"></i></button>
@@ -44,16 +28,38 @@
         <div class="sidebar-header">
             <div class="brand">
                 <div class="logo"><i class="fas fa-wave-square"></i></div>
-                <div class="brand-text"><h1>SENTIRIC</h1><span>WORKSTATION v7.0</span></div>
+                <div class="brand-text"><h1>SENTIRIC</h1><span>WORKSTATION v8.0</span></div>
             </div>
             <button class="close-sidebar mobile-only" id="closeLeft"><i class="fas fa-times"></i></button>
         </div>
         <div class="sidebar-scroll">
             
             <div class="panel-section">
-                <div class="section-title">GİRİŞ & MOD</div>
-                <div class="input-group"><i class="fas fa-globe"></i><select id="langSelect"><option value="auto">✨ Otomatik</option><option value="tr">🇹🇷 Türkçe</option><option value="en">🇺🇸 English</option></select></div>
-                <div class="input-group"><i class="fas fa-terminal"></i><textarea id="promptInput" placeholder="Sistem Prompt..."></textarea></div>
+                <div class="section-title">GİRİŞ & KONTEXT</div>
+                <div class="input-group">
+                    <i class="fas fa-globe"></i>
+                    <select id="langSelect">
+                        <option value="auto">✨ Otomatik Algıla</option>
+                        <option value="tr">🇹🇷 Türkçe</option>
+                        <option value="en">🇺🇸 English</option>
+                        <option value="de">🇩🇪 Deutsch</option>
+                        <option value="fr">🇫🇷 Français</option>
+                        <option value="es">🇪🇸 Español</option>
+                    </select>
+                </div>
+                
+                <!-- Prompt Templates UI -->
+                <div class="template-selector">
+                    <button class="tpl-btn active" onclick="UI.setTemplate('general')">Genel</button>
+                    <button class="tpl-btn" onclick="UI.setTemplate('medical')">Tıp</button>
+                    <button class="tpl-btn" onclick="UI.setTemplate('legal')">Hukuk</button>
+                    <button class="tpl-btn" onclick="UI.setTemplate('tech')">Yazılım</button>
+                </div>
+
+                <div class="input-group">
+                    <i class="fas fa-terminal"></i>
+                    <textarea id="promptInput" placeholder="Sistem Prompt veya Terim Listesi..."></textarea>
+                </div>
             </div>
 
             <div class="panel-section">
@@ -67,16 +73,16 @@
                     <span>⚡ SES MOTORU (DSP)</span><i class="fas fa-chevron-down"></i>
                 </button>
                 <div id="dspAcc" class="accordion-content">
-                    <div class="range-group"><div class="range-header"><span>Filtre Gücü</span><span id="lpfDisplay">0.07</span></div><input type="range" id="lpfRange" min="0.01" max="0.50" step="0.01" value="0.07"></div>
+                    <div class="range-group"><div class="range-header"><span>Filtre Gücü (LPF)</span><span id="lpfDisplay">0.07</span></div><input type="range" id="lpfRange" min="0.01" max="0.50" step="0.01" value="0.07"></div>
                     <div class="range-group"><div class="range-header"><span>Cinsiyet Eşiği (Hz)</span><span id="pitchGateDisplay">170</span></div><input type="range" id="pitchGateRange" min="100" max="250" step="5" value="170"></div>
                     <div class="range-group"><div class="range-header"><span>Kümeleme Hassasiyeti</span><span id="clusterDisplay">0.85</span></div><input type="range" id="clusterRange" min="0.70" max="0.99" step="0.01" value="0.85"></div>
-                    <button class="action-btn danger" style="width:100%" onclick="UI.resetSettings()">Sıfırla</button>
+                    <button class="action-btn danger" style="width:100%" onclick="UI.resetSettings()">Fabrika Ayarları</button>
                 </div>
             </div>
             
             <div class="panel-section">
                  <div class="section-title">MODEL PARAMETRELERİ</div>
-                 <div class="range-group"><div class="range-header"><span>Temp</span><span id="tempDisplay">0.0</span></div><input type="range" id="tempRange" min="0" max="1" step="0.1" value="0"></div>
+                 <div class="range-group"><div class="range-header"><span>Creativity (Temp)</span><span id="tempDisplay">0.0</span></div><input type="range" id="tempRange" min="0" max="1" step="0.1" value="0"></div>
             </div>
         </div>
     </aside>
@@ -85,17 +91,21 @@
         <header class="stage-header desktop-only">
             <div class="header-title"><i class="fas fa-stream"></i> Canlı Akış</div>
             <div class="header-actions">
+                <!-- Yeni Görünüm Kontrolleri -->
+                <button class="action-btn" id="heatmapToggle" onclick="UI.toggleViewMode('heatmap')" title="Güven Haritası"><i class="fas fa-fire"></i></button>
+                <button class="action-btn" id="karaokeToggle" onclick="UI.toggleViewMode('karaoke')" title="Karaoke Modu"><i class="fas fa-microphone-alt"></i></button>
+                <div class="sep"></div>
                 <button class="action-btn theme-toggle"><i class="fas fa-moon"></i></button>
                 <div class="sep"></div>
                 <button class="action-btn danger" onclick="UI.clear()"><i class="fas fa-trash"></i></button>
             </div>
         </header>
 
-        <div id="transcriptFeed" class="transcript-container">
+        <div id="transcriptFeed" class="transcript-container karaoke-mode">
             <div class="empty-placeholder">
                 <div class="placeholder-icon"><i class="fas fa-microphone-lines"></i></div>
                 <h3>Sistem Hazır</h3>
-                <p>Sentiric AI dinliyor.</p>
+                <p>Kayıt yapmak veya dosya yüklemek için aşağıdaki paneli kullanın.</p>
             </div>
         </div>
 
@@ -107,7 +117,6 @@
                     <button class="dock-btn secondary" onclick="document.getElementById('fileInput').click()"><i class="fas fa-folder-open"></i></button>
                 </div>
                 <div class="dock-center">
-                    <!-- Timer Yukarı Alındı -->
                     <div id="recordTimer" class="timer-pill">00:00</div>
                     <button id="recordBtn" class="record-fab"><i class="fas fa-microphone"></i></button>
                 </div>
@@ -121,22 +130,30 @@
     <aside class="sidebar right" id="sidebarRight">
         <div class="sidebar-header"><h3>Analiz & Çıktı</h3><button class="close-sidebar mobile-only" id="closeRight"><i class="fas fa-times"></i></button></div>
         <div class="sidebar-scroll">
-            <div class="metric-hero"><div class="m-label">RTF</div><div class="m-value-lg" id="rtfVal">0.0x</div></div>
+            <div class="metric-hero"><div class="m-label">RTF (HIZ)</div><div class="m-value-lg" id="rtfVal">0.0x</div></div>
+            
+            <div class="section-title" style="margin-top:10px">İSTATİSTİKLER</div>
             <div class="metrics-grid">
                 <div class="metric-box"><div class="m-label">SÜRE</div><div class="m-val" id="durVal">0s</div></div>
                 <div class="metric-box"><div class="m-label">İŞLEM</div><div class="m-val" id="procVal">0ms</div></div>
-                <div class="metric-box"><div class="m-label">GÜVEN</div><div class="m-val" id="confVal">-</div></div>
-                <div class="metric-box"><div class="m-label">DİL</div><div class="m-val" id="langVal">-</div></div>
+                <div class="metric-box"><div class="m-label">ORT. GÜVEN</div><div class="m-val" id="confVal">-</div></div>
+                <div class="metric-box"><div class="m-label">ALGILANAN DİL</div><div class="m-val" id="langVal">-</div></div>
             </div>
+
+            <div class="section-title">GÖRÜNÜM AYARLARI</div>
+            <div class="switch-row"><div class="switch-label"><span>Güven Haritası</span><small>Düşük skoru boya</small></div><label class="toggle"><input type="checkbox" onchange="UI.toggleViewMode('heatmap')"><span class="slider"></span></label></div>
+            <div class="switch-row"><div class="switch-label"><span>Karaoke Efekti</span><small>Okunanı vurgula</small></div><label class="toggle"><input type="checkbox" onchange="UI.toggleViewMode('karaoke')" checked><span class="slider"></span></label></div>
+
             <div class="json-panel">
                 <div class="panel-header">
-                    <span>VERİ ÇIKTISI</span>
+                    <span>HAM VERİ</span>
                     <div style="display:flex; gap:4px">
                         <button class="action-btn" style="padding:2px 8px" onclick="UI.export('json')">JSON</button>
                         <button class="action-btn" style="padding:2px 8px" onclick="UI.export('txt')">TXT</button>
+                        <button class="action-btn" style="padding:2px 8px" onclick="UI.export('srt')">SRT</button>
                     </div>
                 </div>
-                <pre id="jsonOutput">Bekleniyor...</pre>
+                <pre id="jsonOutput">Veri yok...</pre>
             </div>
         </div>
     </aside>

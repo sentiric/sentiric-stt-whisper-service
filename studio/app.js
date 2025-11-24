@@ -2,6 +2,21 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
 // =============================================================================
+// 🧠 PROMPT & CONFIG SYSTEM
+// =============================================================================
+const Templates = {
+    general: "Doğru noktalama işaretleri kullan. Akıcı bir dil kullan.",
+    medical: "Hasta öyküsü ve tıbbi terimler. Anamnez, teşhis, tedavi planı. Kardiyoloji, Nöroloji, Dahiliye terimlerini doğru yaz. Latince terimleri koru.",
+    legal: "Hukuki terminoloji. Mahkeme tutanağı formatı. Davacı, davalı, mübaşir, hakim, hüküm, gereği düşünüldü.",
+    tech: "Yazılım geliştirme toplantısı. API, JSON, Docker, Kubernetes, refactoring, merge request, commit, backend, frontend terimlerini İngilizce olarak koru."
+};
+
+const ViewModes = {
+    heatmap: false,
+    karaoke: true
+};
+
+// =============================================================================
 // 🧠 SPEAKER SYSTEM (Clustering)
 // =============================================================================
 class SpeakerSystem {
@@ -51,11 +66,12 @@ class SpeakerSystem {
 const Speaker = new SpeakerSystem();
 
 // =============================================================================
-// 🎹 AUDIO ENGINE
+// 🎹 AUDIO ENGINE & HARDWARE CONTROL
 // =============================================================================
 const AudioSys = {
     ctx: null, analyser: null, script: null, 
     chunks: [], isRec: false, timer: null, startT: 0, handsFree: false, lastSpk: 0, isSpk: false,
+    wakeLock: null,
 
     async init() {
         if(this.ctx) return;
@@ -68,6 +84,16 @@ const AudioSys = {
         src.connect(this.analyser); this.analyser.connect(this.script); this.script.connect(this.ctx.destination);
         this.script.onaudioprocess = e => this.process(e);
         UI.startViz();
+    },
+
+    async requestWakeLock() {
+        try { if(navigator.wakeLock) this.wakeLock = await navigator.wakeLock.request('screen'); } catch(e) { console.log('WakeLock error:', e); }
+    },
+    releaseWakeLock() {
+        if(this.wakeLock) { this.wakeLock.release().then(() => { this.wakeLock = null; }); }
+    },
+    haptic(pattern = [20]) {
+        if(navigator.vibrate) navigator.vibrate(pattern);
     },
 
     process(e) {
@@ -125,6 +151,22 @@ const UI = {
             document.body.setAttribute('data-theme', n); localStorage.setItem('theme', n);
         });
         document.onkeydown = e => { if(e.code=='Space' && e.target.tagName!='TEXTAREA' && e.target.tagName!='INPUT') { e.preventDefault(); this.toggleRec(); } };
+        
+        // Init default template
+        if(!$('#promptInput').value) this.setTemplate('general');
+    },
+
+    setTemplate(key) {
+        $('#promptInput').value = Templates[key] || "";
+        $$('.tpl-btn').forEach(b => b.classList.remove('active'));
+        event?.target?.classList?.add('active');
+    },
+
+    toggleViewMode(mode) {
+        ViewModes[mode] = !ViewModes[mode];
+        $(`#transcriptFeed`).classList.toggle(`${mode}-mode`, ViewModes[mode]);
+        const btn = $(`#${mode}Toggle`);
+        if(btn) btn.classList.toggle('active', ViewModes[mode]);
     },
 
     bind(inpId, dispId, key, cb) {
@@ -140,12 +182,14 @@ const UI = {
         if(!AudioSys.ctx) AudioSys.init();
         if(AudioSys.isRec) {
             AudioSys.isRec = false; clearInterval(AudioSys.timer);
+            AudioSys.releaseWakeLock(); AudioSys.haptic([50, 50, 50]);
             $('#recordBtn').classList.remove('recording'); $('#recordTimer').classList.remove('active');
             const dur = Date.now() - AudioSys.startT;
             if(dur > 500) this.sendAudio(AudioSys.getBlob(), dur);
             AudioSys.chunks = []; $('#recordTimer').innerText = "00:00";
         } else {
             AudioSys.chunks = []; AudioSys.isRec = true; AudioSys.startT = Date.now();
+            AudioSys.requestWakeLock(); AudioSys.haptic([50]);
             $('#recordBtn').classList.add('recording'); $('#recordTimer').classList.add('active');
             AudioSys.timer = setInterval(() => {
                 const d = Math.floor((Date.now() - AudioSys.startT)/1000);
@@ -158,6 +202,7 @@ const UI = {
         AudioSys.handsFree = !AudioSys.handsFree;
         $('#vadBtn').classList.toggle('active');
         $('#vadBtn .active-dot').style.display = AudioSys.handsFree ? 'block' : 'none';
+        AudioSys.haptic([20]);
         if(AudioSys.handsFree && !AudioSys.ctx) AudioSys.init();
     },
 
@@ -193,9 +238,8 @@ const UI = {
     render(data, dur, url) {
         const c = $('#transcriptFeed');
         $('.empty-placeholder')?.remove();
-        const segs = data.segments && data.segments.length ? data.segments : [{text: data.text, start:0, speaker_vec:[], gender:'?'}];
+        const segs = data.segments && data.segments.length ? data.segments : [{text: data.text, start:0, speaker_vec:[], gender:'?', words:[]}];
         
-        // DOM Update
         segs.forEach((seg, idx) => {
             const isBad = seg.text.match(/^(\[|\(|\-Altyazı)/) || seg.text.length < 2;
             const spk = Speaker.identify(seg.speaker_vec, {gender: seg.gender});
@@ -205,22 +249,35 @@ const UI = {
             const pPct = Math.min(100, (vec[0]||0)*100); const ePct = Math.min(100, (vec[2]||0)*100);
             let waves = ''; for(let i=0; i<12; i++) waves += `<div class="wave-line" style="height:${Math.random()*8+4}px"></div>`;
 
+            // HTML for words with heatmap data
+            let textHtml = "";
+            if (seg.words && seg.words.length > 0) {
+                textHtml = seg.words.map(w => {
+                    let confClass = "high";
+                    if(w.probability < 0.5) confClass = "low";
+                    else if(w.probability < 0.75) confClass = "mid";
+                    return `<span class="w" data-start="${w.start}" data-end="${w.end}" data-prob="${(w.probability*100).toFixed(0)}%" data-conf="${confClass}">${w.word}</span>`;
+                }).join(" ");
+            } else {
+                textHtml = seg.text;
+            }
+
             const playerHtml = url && idx===segs.length-1 ? `
                 <div class="mini-player">
-                    <button class="player-btn" onclick="UI.play(this,'${url}')"><i class="fas fa-play"></i></button>
+                    <button class="player-btn" onclick="UI.play(this,'${url}', ${seg.start})"><i class="fas fa-play"></i></button>
                     <div class="wave-vis">${waves}</div>
                     <div class="sep" style="height:12px; margin:0 4px"></div>
                     <button class="player-btn" onclick="UI.downloadAudio('${url}')" title="Kayıdı İndir"><i class="fas fa-download"></i></button>
                 </div>` : '';
 
             const html = `
-            <div class="speaker-row">
+            <div class="speaker-row" id="seg-${Date.now()}-${idx}">
                 <div class="avatar-box" style="border-color:${spk.color}; color:${spk.color}" onclick="Speaker.rename('${spk.id}')">
                     ${gen}<div class="emo-tag">${emo}</div>
                 </div>
                 <div class="msg-content">
                     <div class="msg-meta"><span class="spk-label spk-lbl-${spk.id}" style="color:${spk.color}">${spk.name}</span><span class="time-label">${seg.start.toFixed(1)}s</span></div>
-                    <div class="bubble ${isBad?'hallucination':''}" style="border-left-color:${spk.color}">${seg.text}</div>
+                    <div class="bubble ${isBad?'hallucination':''}" style="border-left-color:${spk.color}">${textHtml}</div>
                     <div class="features-row">
                         ${playerHtml}
                         <div class="prosody-item" title="Pitch"><i class="fas fa-music"></i><div class="bar-track"><div class="bar-fill" style="width:${pPct}%; background:${spk.color}"></div></div></div>
@@ -231,18 +288,66 @@ const UI = {
             c.insertAdjacentHTML('beforeend', html);
         });
         
-      // AUTO SCROLL FIX
         requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
     },
 
-    play(el, url) {
+    play(el, url, offset) {
         const i = el.querySelector('i');
-        if(i.classList.contains('fa-pause')) { window.audio.pause(); return; }
-        if(window.audio) { window.audio.pause(); window.playBtn.className='fas fa-play'; }
-        window.audio = new Audio(url); window.playBtn = i;
-        i.className = 'fas fa-pause'; window.audio.play(); 
-        window.audio.onended = () => i.className = 'fas fa-play';
-        window.audio.onpause = () => i.className = 'fas fa-play';
+        
+        // Stop Logic
+        if(window.audio) {
+            window.audio.pause(); 
+            window.playBtn.className='fas fa-play';
+            if(window.karaokeInterval) clearInterval(window.karaokeInterval);
+            // Reset highlighting
+            $$('.w.active-word').forEach(e => e.classList.remove('active-word'));
+            if(window.playBtn === i) { window.audio = null; return; }
+        }
+
+        // Play Logic
+        window.audio = new Audio(url); 
+        window.playBtn = i;
+        i.className = 'fas fa-pause'; 
+        window.audio.play(); 
+        
+        const row = el.closest('.speaker-row');
+        const words = row ? Array.from(row.querySelectorAll('.w')) : [];
+
+        // Karaoke Loop
+        if (ViewModes.karaoke && words.length > 0) {
+            window.karaokeInterval = setInterval(() => {
+                if(!window.audio) return;
+                const ct = window.audio.currentTime + offset; // Adjust for segment offset if needed (assuming file is full clip)
+                // Actually usually file is full, segment times are global. 
+                // But here we upload small clips usually. 
+                // Let's assume the clip corresponds to the segments rendered.
+                // If it's a full recording, seg.start matters. But usually we process chunk by chunk.
+                // NOTE: For live stream/chunk, file starts at 0. So words.start might need offsetting relative to file.
+                // However, backend returns global timestamp relative to beginning of stream? 
+                // For simplicity in this demo, let's assume words.start is relative to the clip playing.
+                
+                // Correction: Whisper API returns relative to start of processing usually.
+                // Let's use simple matching.
+                
+                const localT = window.audio.currentTime; // File is the chunk itself.
+                
+                words.forEach(w => {
+                    const s = parseFloat(w.getAttribute('data-start'));
+                    const e = parseFloat(w.getAttribute('data-end'));
+                    // We need to normalize start time if segments are absolute.
+                    // But here, since we upload one file and get result, t0 is usually 0-based for that file.
+                    if (localT >= s && localT <= e) w.classList.add('active-word');
+                    else w.classList.remove('active-word');
+                });
+            }, 50);
+        }
+
+        window.audio.onended = () => {
+            i.className = 'fas fa-play';
+            if(window.karaokeInterval) clearInterval(window.karaokeInterval);
+            $$('.w.active-word').forEach(e => e.classList.remove('active-word'));
+            window.audio = null;
+        };
     },
 
     showLoading() {
@@ -256,20 +361,34 @@ const UI = {
     updateMetrics(dur, proc, data) {
         $('#rtfVal').innerText = data.meta?.rtf ? (1/data.meta.rtf).toFixed(1) + 'x' : '0.0x';
         $('#durVal').innerText = (dur/1000).toFixed(2)+'s'; $('#procVal').innerText = (proc/1000).toFixed(2)+'s';
+        
+        // Avg Confidence
+        let total = 0, count = 0;
+        data.segments?.forEach(s => s.words?.forEach(w => { total += w.probability; count++; }));
+        const avg = count ? (total/count*100).toFixed(0) : 0;
+        $('#confVal').innerText = avg + '%';
+        $('#langVal').innerText = (data.language || '?').toUpperCase();
+        
         $('#jsonOutput').innerText = JSON.stringify(data, null, 2);
     },
 
     export(t) {
-        const data = []; let txt = "";
-        $$('.speaker-row').forEach(r => { 
-            if(r.id.startsWith('tmp')) return;
-            const n = r.querySelector('.spk-label').innerText; 
-            const m = r.querySelector('.bubble').innerText.replace(/\n/g,' ');
-            if (t === 'json') data.push({ speaker: n, text: m }); else txt += `[${n}]: ${m}\n`;
-        });
-        const blobContent = t === 'json' ? JSON.stringify(data, null, 2) : txt;
-        const blob = new Blob([blobContent], {type: t === 'json' ? 'application/json' : 'text/plain'});
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'transcript.' + t; a.click();
+        let content = "";
+        const data = JSON.parse($('#jsonOutput').innerText || "{}");
+        
+        if (t === 'json') {
+            content = JSON.stringify(data, null, 2);
+        } else if (t === 'txt') {
+            (data.segments || []).forEach(s => content += `[${s.start.toFixed(1)}s]: ${s.text}\n`);
+        } else if (t === 'srt') {
+            (data.segments || []).forEach((s, i) => {
+                const toTime = (sec) => new Date(sec * 1000).toISOString().substr(11, 12).replace('.', ',');
+                content += `${i+1}\n${toTime(s.start)} --> ${toTime(s.end)}\n${s.text}\n\n`;
+            });
+        }
+        
+        const blob = new Blob([content], {type: 'text/plain'});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `transcript.${t}`; a.click();
     },
 
     startViz() {
