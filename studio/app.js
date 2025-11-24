@@ -2,7 +2,24 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
 // =============================================================================
-// 📈 SYSTEM MONITOR (NEW)
+// 🧹 TEXT CLEANER & HALLUCINATION FILTER
+// =============================================================================
+const TextProcessor = {
+    BANNED_PHRASES: [
+        "Sesli Betimleme", "Betimleme", "www.sebeder.com", "altyazı", "Senkron", 
+        "TRT", "Dizinin", "estetekal.com", "Altyazı", "Müzik", "[Music]"
+    ],
+    isHallucination(text) {
+        if (!text || text.length < 2) return true;
+        if (text.match(/^\[.*\]$/)) return true;
+        const lower = text.toLowerCase();
+        return this.BANNED_PHRASES.some(phrase => lower.includes(phrase.toLowerCase()));
+    },
+    clean(text) { return text.trim(); }
+};
+
+// =============================================================================
+// 📈 SYSTEM MONITOR
 // =============================================================================
 class SystemMonitor {
     constructor() {
@@ -11,118 +28,62 @@ class SystemMonitor {
         this.history = new Array(50).fill(0);
         this.lastTokens = 0;
         this.lastCheck = Date.now();
-        
-        if (this.ctx) {
-            this.resize();
-            this.startPolling();
-        }
+        if (this.ctx) { this.resize(); this.startPolling(); }
     }
-
-    resize() {
-        if(!this.canvas) return;
-        this.canvas.width = this.canvas.parentElement.offsetWidth;
-        this.canvas.height = 80;
-    }
-
+    resize() { if(this.canvas) { this.canvas.width = this.canvas.parentElement.offsetWidth; this.canvas.height = 60; } }
     async startPolling() {
         setInterval(async () => {
             try {
-                // Port 15032 Metrics Server'a istek
                 const r = await fetch('http://localhost:15032/metrics');
                 const text = await r.text();
                 this.parseAndRender(text);
-            } catch (e) {
-                // console.warn("Metrics polling failed (backend offline?)", e);
-            }
+            } catch (e) { }
         }, 1000);
     }
-
     parseAndRender(text) {
-        // Simple Regex Parsing
-        const getVal = (key) => {
-            const m = text.match(new RegExp(`${key} ([0-9.]+)`));
-            return m ? parseFloat(m[1]) : 0;
-        };
-
-        const totalReq = getVal('stt_requests_total');
-        const totalAudio = getVal('stt_audio_seconds_processed_total');
-        const currentTokens = getVal('stt_tokens_generated_total');
-
-        // Update Stats UI
-        $('#totalReq').innerText = totalReq;
-        $('#totalAudio').innerText = (totalAudio / 3600).toFixed(2);
-
-        // TPS Calculation
+        const getVal = (k) => { const m = text.match(new RegExp(`${k} ([0-9.]+)`)); return m ? parseFloat(m[1]) : 0; };
+        const tokens = getVal('stt_tokens_generated_total');
+        $('#totalReq').innerText = getVal('stt_requests_total');
+        $('#totalAudio').innerText = (getVal('stt_audio_seconds_processed_total')/3600).toFixed(2);
+        
         const now = Date.now();
         const dt = (now - this.lastCheck) / 1000;
         let tps = 0;
+        if (dt > 0 && this.lastTokens > 0) tps = Math.max(0, (tokens - this.lastTokens) / dt);
         
-        if (dt > 0 && this.lastTokens > 0) {
-            const dTokens = currentTokens - this.lastTokens;
-            tps = dTokens / dt;
-        }
-
-        this.lastTokens = currentTokens;
-        this.lastCheck = now;
-
-        // Smooth TPS for UI
+        this.lastTokens = tokens; this.lastCheck = now;
         $('#tpsVal').innerText = tps.toFixed(1);
-
-        // Push to History & Draw
-        this.history.push(tps);
-        this.history.shift();
+        this.history.push(tps); this.history.shift();
         this.draw();
     }
-
     draw() {
         if(!this.ctx) return;
-        const w = this.canvas.width;
-        const h = this.canvas.height;
-        const ctx = this.ctx;
-        
+        const w = this.canvas.width; const h = this.canvas.height; const ctx = this.ctx;
         ctx.clearRect(0, 0, w, h);
-        
-        // Draw Line
-        ctx.beginPath();
-        ctx.strokeStyle = '#10b981';
-        ctx.lineWidth = 2;
-        
-        const maxVal = Math.max(10, ...this.history);
-        const step = w / (this.history.length - 1);
-
-        this.history.forEach((val, i) => {
-            const x = i * step;
-            const y = h - (val / maxVal * h * 0.8) - 5; // %80 yükseklik kullan, alt boşluk bırak
-            if(i===0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        ctx.beginPath(); ctx.strokeStyle = '#10b981'; ctx.lineWidth = 2;
+        const max = Math.max(10, ...this.history); const step = w / (this.history.length - 1);
+        this.history.forEach((v, i) => { 
+            const y = h - (v/max * h * 0.9); 
+            if(i===0) ctx.moveTo(0, y); else ctx.lineTo(i*step, y); 
         });
         ctx.stroke();
-
-        // Fill Area
-        ctx.lineTo(w, h);
-        ctx.lineTo(0, h);
-        ctx.fillStyle = 'rgba(16, 185, 129, 0.1)';
-        ctx.fill();
     }
 }
 const SysMon = new SystemMonitor();
 
 // =============================================================================
-// 🧠 PROMPT & CONFIG SYSTEM
+// 🧠 TEMPLATES
 // =============================================================================
 const Templates = {
     general: "Doğru noktalama işaretleri kullan. Akıcı bir dil kullan.",
-    medical: "Hasta öyküsü ve tıbbi terimler. Anamnez, teşhis, tedavi planı. Kardiyoloji, Nöroloji, Dahiliye terimlerini doğru yaz. Latince terimleri koru.",
-    legal: "Hukuki terminoloji. Mahkeme tutanağı formatı. Davacı, davalı, mübaşir, hakim, hüküm, gereği düşünüldü.",
-    tech: "Yazılım geliştirme toplantısı. API, JSON, Docker, Kubernetes, refactoring, merge request, commit, backend, frontend terimlerini İngilizce olarak koru."
+    medical: "Hasta öyküsü, anamnez, teşhis, tedavi. Tıbbi terimler.",
+    legal: "Hukuki terminoloji. Davacı, davalı, hüküm.",
+    tech: "API, JSON, Docker, Kubernetes, refactoring, commit."
 };
-
-const ViewModes = {
-    heatmap: false,
-    karaoke: true
-};
+const ViewModes = { heatmap: false, karaoke: true };
 
 // =============================================================================
-// 🧠 SPEAKER SYSTEM (Clustering)
+// 🧠 SPEAKER SYSTEM
 // =============================================================================
 class SpeakerSystem {
     constructor() {
@@ -171,12 +132,15 @@ class SpeakerSystem {
 const Speaker = new SpeakerSystem();
 
 // =============================================================================
-// 🎹 AUDIO ENGINE & HARDWARE CONTROL
+// 🎹 AUDIO ENGINE
 // =============================================================================
 const AudioSys = {
     ctx: null, analyser: null, script: null, 
     chunks: [], isRec: false, timer: null, startT: 0, handsFree: false, lastSpk: 0, isSpk: false,
     wakeLock: null,
+    // YENİ VAD AYARLARI
+    vadThreshold: 0.02,
+    vadPauseTime: 1500,
 
     async init() {
         if(this.ctx) return;
@@ -190,35 +154,39 @@ const AudioSys = {
         this.script.onaudioprocess = e => this.process(e);
         UI.startViz();
     },
-
-    async requestWakeLock() {
-        try { if(navigator.wakeLock) this.wakeLock = await navigator.wakeLock.request('screen'); } catch(e) { console.log('WakeLock error:', e); }
-    },
-    releaseWakeLock() {
-        if(this.wakeLock) { this.wakeLock.release().then(() => { this.wakeLock = null; }); }
-    },
-    haptic(pattern = [20]) {
-        if(navigator.vibrate) navigator.vibrate(pattern);
-    },
-
+    async requestWakeLock() { try { if(navigator.wakeLock) this.wakeLock = await navigator.wakeLock.request('screen'); } catch(e){} },
+    releaseWakeLock() { if(this.wakeLock) { this.wakeLock.release(); this.wakeLock = null; } },
+    haptic(pattern = [20]) { if(navigator.vibrate) navigator.vibrate(pattern); },
+    
     process(e) {
         const inData = e.inputBuffer.getChannelData(0);
         let s = 0; for(let i=0; i<inData.length; i++) s += inData[i]*inData[i];
         const rms = Math.sqrt(s/inData.length);
+        
         if(this.isRec) this.chunks.push(this.floatTo16(inData));
+        
         if(this.handsFree) { 
-            const th = 0.02; 
-            if(rms > th) { this.lastSpk = Date.now(); if(!this.isSpk) { this.isSpk = true; if(!this.isRec) UI.toggleRec(); } } 
-            else if(this.isSpk && Date.now() - this.lastSpk > 1500) { this.isSpk = false; if(this.isRec) UI.toggleRec(); }
+            // Dinamik UI Ayarlarını Kullan
+            const th = this.vadThreshold; 
+            const pt = this.vadPauseTime;
+            
+            if(rms > th) { 
+                this.lastSpk = Date.now(); 
+                if(!this.isSpk) { 
+                    this.isSpk = true; 
+                    if(!this.isRec) UI.toggleRec(); 
+                } 
+            } else if(this.isSpk && Date.now() - this.lastSpk > pt) { 
+                this.isSpk = false; 
+                if(this.isRec) UI.toggleRec(); 
+            }
         }
     },
-
     floatTo16(input) {
         const out = new Int16Array(input.length);
         for(let i=0; i<input.length; i++) { let s = Math.max(-1, Math.min(1, input[i])); out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; }
         return out;
     },
-
     getBlob() {
         const len = this.chunks.reduce((a,c)=>a+c.length,0); const res = new Int16Array(len); let o=0;
         for(let c of this.chunks) { res.set(c,o); o+=c.length; }
@@ -240,10 +208,17 @@ const UI = {
         $('#closeLeft').onclick = () => tog('Left', false); $('#closeRight').onclick = () => tog('Right', false);
         $$('.sidebar-overlay').forEach(o => o.onclick = () => { tog('Left', false); tog('Right', false); });
 
-        this.bind('#tempRange', '#tempDisplay', 'stt_temp');
-        this.bind('#lpfRange', '#lpfDisplay', 'stt_lpf');
-        this.bind('#pitchGateRange', '#pitchGateDisplay', 'stt_pitch_gate');
-        this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', (v) => Speaker.setThreshold(v));
+        // DÜZELTİLDİ: bind fonksiyonu çağrıları artık güvenli
+        this.bind('#tempRange', '#tempDisplay', 'stt_temp', "0.0");
+        this.bind('#lpfRange', '#lpfDisplay', 'stt_lpf', "0.05");
+        this.bind('#pitchGateRange', '#pitchGateDisplay', 'stt_pitch_gate', "165");
+        
+        // Speaker Cluster Callback
+        this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', "0.85", (v) => Speaker.setThreshold(v));
+
+        // YENİ: VAD AYARLARI
+        this.bind('#vadThRange', '#vadThDisplay', 'stt_vad_th', "0.02", (v) => AudioSys.vadThreshold = parseFloat(v));
+        this.bind('#vadPauseRange', '#vadPauseDisplay', 'stt_vad_pause', "1500", (v) => AudioSys.vadPauseTime = parseInt(v));
 
         $('#recordBtn').onclick = () => this.toggleRec();
         $('#vadBtn').onclick = () => this.toggleVad();
@@ -257,7 +232,6 @@ const UI = {
         });
         document.onkeydown = e => { if(e.code=='Space' && e.target.tagName!='TEXTAREA' && e.target.tagName!='INPUT') { e.preventDefault(); this.toggleRec(); } };
         
-        // Init default template
         if(!$('#promptInput').value) this.setTemplate('general');
     },
 
@@ -270,14 +244,30 @@ const UI = {
     toggleViewMode(mode) {
         ViewModes[mode] = !ViewModes[mode];
         $(`#transcriptFeed`).classList.toggle(`${mode}-mode`, ViewModes[mode]);
-        const btn = $(`#${mode}Toggle`);
-        if(btn) btn.classList.toggle('active', ViewModes[mode]);
+        const btn = $(`#${mode}Toggle`); if(btn) btn.classList.toggle('active', ViewModes[mode]);
     },
 
-    bind(inpId, dispId, key, cb) {
-        const el = $(inpId); const stored = localStorage.getItem(key);
-        if(stored) { el.value = stored; $(dispId).innerText = stored; if(cb) cb(stored); }
-        el.oninput = e => { $(dispId).innerText = e.target.value; localStorage.setItem(key, e.target.value); if(cb) cb(e.target.value); };
+    // DÜZELTME: bind fonksiyonu hataya karşı korumalı
+    bind(inpId, dispId, key, defValue, callback) {
+        const el = $(inpId);
+        const display = $(dispId);
+        if(!el) return;
+
+        const stored = localStorage.getItem(key);
+        const val = stored !== null ? stored : defValue;
+        
+        el.value = val;
+        if(display) display.innerText = val;
+        
+        // Init sırasında callback çalıştır
+        if (typeof callback === 'function') callback(val);
+
+        el.oninput = e => { 
+            const v = e.target.value;
+            if(display) display.innerText = v; 
+            localStorage.setItem(key, v); 
+            if (typeof callback === 'function') callback(v);
+        };
     },
 
     toggleAcc(id) { $(`#${id}`).classList.toggle('active'); },
@@ -287,7 +277,7 @@ const UI = {
         if(!AudioSys.ctx) AudioSys.init();
         if(AudioSys.isRec) {
             AudioSys.isRec = false; clearInterval(AudioSys.timer);
-            AudioSys.releaseWakeLock(); AudioSys.haptic([50, 50, 50]);
+            AudioSys.releaseWakeLock(); AudioSys.haptic([50, 50]);
             $('#recordBtn').classList.remove('recording'); $('#recordTimer').classList.remove('active');
             const dur = Date.now() - AudioSys.startT;
             if(dur > 500) this.sendAudio(AudioSys.getBlob(), dur);
@@ -305,10 +295,20 @@ const UI = {
 
     toggleVad() {
         AudioSys.handsFree = !AudioSys.handsFree;
-        $('#vadBtn').classList.toggle('active');
-        $('#vadBtn .active-dot').style.display = AudioSys.handsFree ? 'block' : 'none';
-        AudioSys.haptic([20]);
-        if(AudioSys.handsFree && !AudioSys.ctx) AudioSys.init();
+        const btn = $('#vadBtn');
+        
+        // GÖRSEL GÜNCELLEME
+        if (AudioSys.handsFree) {
+            btn.classList.add('active');
+            // İkon değişimi (Robot -> Dalga)
+            btn.innerHTML = '<div class="active-dot"></div><i class="fas fa-wave-square"></i>';
+            AudioSys.haptic([50]);
+            if(!AudioSys.ctx) AudioSys.init();
+        } else {
+            btn.classList.remove('active');
+            btn.innerHTML = '<div class="active-dot" style="display:none"></div><i class="fas fa-robot"></i>';
+            AudioSys.haptic([20]);
+        }
     },
 
     async sendAudio(blob, durMs) {
@@ -321,32 +321,76 @@ const UI = {
         fd.append('prosody_pitch_gate', $('#pitchGateRange').value);
         
         const tempId = this.showLoading();
+        
         try {
             const t0 = Date.now();
             const r = await fetch('/v1/transcribe', { method: 'POST', body: fd });
             const d = await r.json();
-            this.removeLoading(tempId);
+            
+            this.removeLoading(tempId); // Yükleniyor balonunu sil
+            
             if(r.ok) {
                 const url = URL.createObjectURL(blob);
-                this.render(d, durMs, url);
-                this.updateMetrics(durMs, Date.now()-t0, d);
-            } else { alert("API Hatası: " + (d.error || "Bilinmiyor")); }
-        } catch(e) { this.removeLoading(tempId); console.error(e); }
+                
+                // KONTROL: Eğer segment yoksa veya hepsi filtrelendiyse
+                if (!d.segments || d.segments.length === 0) {
+                    this.showToast("⚠️ Ses algılandı ama metin çözülemedi (Sessizlik/Gürültü).");
+                    return;
+                }
+
+                const renderedCount = this.render(d, durMs, url);
+                
+                // Eğer render fonksiyonu da (halüsinasyon filtresi yüzünden) hiçbir şey basmadıysa
+                if (renderedCount === 0) {
+                    this.showToast("🚫 Sonuç filtrelendi (Gürültü/Halüsinasyon).");
+                } else {
+                    this.updateMetrics(durMs, Date.now()-t0, d);
+                }
+
+            } else { 
+                this.showToast("❌ API Hatası: " + (d.error || "Bilinmiyor")); 
+            }
+        } catch(e) { 
+            this.removeLoading(tempId); 
+            console.error(e);
+            this.showToast("❌ Bağlantı Hatası");
+        }
     },
 
     downloadAudio(url) {
         if(!url) return;
-        const a = document.createElement('a'); a.href = url;
-        a.download = `sentiric_rec_${Date.now()}.wav`; a.click();
+        const a = document.createElement('a'); a.href = url; a.download = `rec_${Date.now()}.wav`; a.click();
     },
+
+    // Basit bir Toast Bildirim Fonksiyonu
+    showToast(msg) {
+        const t = document.createElement('div');
+        t.className = 'toast-msg';
+        t.innerText = msg;
+        t.style.cssText = `
+            position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
+            background: #333; color: #fff; padding: 10px 20px; border-radius: 20px;
+            font-size: 12px; opacity: 0; transition: 0.3s; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+        `;
+        document.body.appendChild(t);
+        requestAnimationFrame(() => { t.style.opacity = '1'; t.style.bottom = '120px'; });
+        setTimeout(() => { t.style.opacity = '0'; t.style.bottom = '100px'; setTimeout(() => t.remove(), 300); }, 3000);
+    },    
 
     render(data, dur, url) {
         const c = $('#transcriptFeed');
         $('.empty-placeholder')?.remove();
-        const segs = data.segments && data.segments.length ? data.segments : [{text: data.text, start:0, speaker_vec:[], gender:'?', words:[]}];
         
+        // Eğer segment yoksa text'i segment yap
+        const segs = data.segments && data.segments.length ? data.segments : (data.text ? [{text: data.text, start:0, speaker_vec:[], gender:'?', words:[]}] : []);
+        
+        let renderedCount = 0;
+
         segs.forEach((seg, idx) => {
-            const isBad = seg.text.match(/^(\[|\(|\-Altyazı)/) || seg.text.length < 2;
+            if (TextProcessor.isHallucination(seg.text)) return; 
+            renderedCount++;
+
             const spk = Speaker.identify(seg.speaker_vec, {gender: seg.gender});
             const emo = { excited:"🔥", sad:"😢", angry:"😠" }[seg.emotion] || "";
             const gen = spk.gender === 'F' ? '👩' : (spk.gender === 'M' ? '👨' : '👤');
@@ -354,15 +398,17 @@ const UI = {
             const pPct = Math.min(100, (vec[0]||0)*100); const ePct = Math.min(100, (vec[2]||0)*100);
             let waves = ''; for(let i=0; i<12; i++) waves += `<div class="wave-line" style="height:${Math.random()*8+4}px"></div>`;
 
-            // HTML for words with heatmap data
             let textHtml = "";
             if (seg.words && seg.words.length > 0) {
+                // TOKEN BOŞLUK DÜZELTMESİ v2
+                // Whisper tokenları bazen başında boşluk içerir (" mer", "ha", "ba").
+                // Bazen içermez. Biz manuel boşluk eklemek yerine
+                // token'ın kendi boşluğunu kullanacağız (clean_utf8 bunu bozmamalı).
+                // join("") kullanarak tokenları ham haliyle birleştiriyoruz.
                 textHtml = seg.words.map(w => {
-                    let confClass = "high";
-                    if(w.probability < 0.5) confClass = "low";
-                    else if(w.probability < 0.75) confClass = "mid";
-                    return `<span class="w" data-start="${w.start}" data-end="${w.end}" data-prob="${(w.probability*100).toFixed(0)}%" data-conf="${confClass}">${w.word}</span>`;
-                }).join(""); // <--- FIX: join(" ") yerine join("")
+                    let cls = w.probability < 0.5 ? "low" : (w.probability < 0.75 ? "mid" : "high");
+                    return `<span class="w" data-start="${w.start}" data-end="${w.end}" data-conf="${cls}">${w.word}</span>`;
+                }).join(""); 
             } else {
                 textHtml = seg.text;
             }
@@ -372,7 +418,7 @@ const UI = {
                     <button class="player-btn" onclick="UI.play(this,'${url}', ${seg.start})"><i class="fas fa-play"></i></button>
                     <div class="wave-vis">${waves}</div>
                     <div class="sep" style="height:12px; margin:0 4px"></div>
-                    <button class="player-btn" onclick="UI.downloadAudio('${url}')" title="Kayıdı İndir"><i class="fas fa-download"></i></button>
+                    <button class="player-btn" onclick="UI.downloadAudio('${url}')"><i class="fas fa-download"></i></button>
                 </div>` : '';
 
             const html = `
@@ -382,7 +428,7 @@ const UI = {
                 </div>
                 <div class="msg-content">
                     <div class="msg-meta"><span class="spk-label spk-lbl-${spk.id}" style="color:${spk.color}">${spk.name}</span><span class="time-label">${seg.start.toFixed(1)}s</span></div>
-                    <div class="bubble ${isBad?'hallucination':''}" style="border-left-color:${spk.color}">${textHtml}</div>
+                    <div class="bubble" style="border-left-color:${spk.color}">${textHtml}</div>
                     <div class="features-row">
                         ${playerHtml}
                         <div class="prosody-item" title="Pitch"><i class="fas fa-music"></i><div class="bar-track"><div class="bar-fill" style="width:${pPct}%; background:${spk.color}"></div></div></div>
@@ -393,61 +439,37 @@ const UI = {
             c.insertAdjacentHTML('beforeend', html);
         });
         
-        requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
+        if (renderedCount > 0) {
+            requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
+        }
+        return renderedCount;
     },
 
     play(el, url, offset) {
         const i = el.querySelector('i');
-        
-        // Stop Logic
         if(window.audio) {
-            window.audio.pause(); 
-            window.playBtn.className='fas fa-play';
+            window.audio.pause(); window.playBtn.className='fas fa-play';
             if(window.karaokeInterval) clearInterval(window.karaokeInterval);
-            // Reset highlighting
             $$('.w.active-word').forEach(e => e.classList.remove('active-word'));
             if(window.playBtn === i) { window.audio = null; return; }
         }
-
-        // Play Logic
-        window.audio = new Audio(url); 
-        window.playBtn = i;
-        i.className = 'fas fa-pause'; 
-        window.audio.play(); 
-        
-        const row = el.closest('.speaker-row');
-        const words = row ? Array.from(row.querySelectorAll('.w')) : [];
-
-        // Karaoke Loop
+        window.audio = new Audio(url); window.playBtn = i; i.className = 'fas fa-pause'; window.audio.play(); 
+        const row = el.closest('.speaker-row'); const words = row ? Array.from(row.querySelectorAll('.w')) : [];
         if (ViewModes.karaoke && words.length > 0) {
             window.karaokeInterval = setInterval(() => {
                 if(!window.audio) return;
-                const ct = window.audio.currentTime + offset; // Adjust for segment offset if needed (assuming file is full clip)
-                
-                // Correction: Whisper API returns relative to start of processing usually.
-                // Let's use simple matching.
-                
-                const localT = window.audio.currentTime; // File is the chunk itself.
-                
+                const localT = window.audio.currentTime;
                 words.forEach(w => {
-                    const s = parseFloat(w.getAttribute('data-start'));
-                    const e = parseFloat(w.getAttribute('data-end'));
-                    // We need to normalize start time if segments are absolute.
-                    // But here, since we upload one file and get result, t0 is usually 0-based for that file.
-                    if (localT >= s && localT <= e) w.classList.add('active-word');
-                    else w.classList.remove('active-word');
+                    const s = parseFloat(w.getAttribute('data-start')); const e = parseFloat(w.getAttribute('data-end'));
+                    if (localT >= s && localT <= e) w.classList.add('active-word'); else w.classList.remove('active-word');
                 });
             }, 50);
         }
-
         window.audio.onended = () => {
-            i.className = 'fas fa-play';
-            if(window.karaokeInterval) clearInterval(window.karaokeInterval);
-            $$('.w.active-word').forEach(e => e.classList.remove('active-word'));
-            window.audio = null;
+            i.className = 'fas fa-play'; if(window.karaokeInterval) clearInterval(window.karaokeInterval);
+            $$('.w.active-word').forEach(e => e.classList.remove('active-word')); window.audio = null;
         };
     },
-
     showLoading() {
         const id = 'tmp-'+Date.now();
         $('#transcriptFeed').insertAdjacentHTML('beforeend', `<div id="${id}" class="speaker-row" style="opacity:0.5"><div class="avatar-box"><i class="fas fa-circle-notch fa-spin"></i></div><div class="msg-content"><div class="bubble">İşleniyor...</div></div></div>`);
@@ -455,42 +477,19 @@ const UI = {
         return id;
     },
     removeLoading(id) { document.getElementById(id)?.remove(); },
-
     updateMetrics(dur, proc, data) {
         $('#rtfVal').innerText = data.meta?.rtf ? (1/data.meta.rtf).toFixed(1) + 'x' : '0.0x';
         $('#durVal').innerText = (dur/1000).toFixed(2)+'s'; $('#procVal').innerText = (proc/1000).toFixed(2)+'s';
-        
-        // Avg Confidence
-        let total = 0, count = 0;
-        data.segments?.forEach(s => s.words?.forEach(w => { total += w.probability; count++; }));
-        // const avg = count ? (total/count*100).toFixed(0) : 0;
-        // $('#confVal').innerText = avg + '%';
-        // $('#langVal').innerText = (data.language || '?').toUpperCase();
-        
         $('#tokenVal').innerText = data.meta?.tokens || 0;
-        
         $('#jsonOutput').innerText = JSON.stringify(data, null, 2);
     },
-
     export(t) {
-        let content = "";
-        const data = JSON.parse($('#jsonOutput').innerText || "{}");
-        
-        if (t === 'json') {
-            content = JSON.stringify(data, null, 2);
-        } else if (t === 'txt') {
-            (data.segments || []).forEach(s => content += `[${s.start.toFixed(1)}s]: ${s.text}\n`);
-        } else if (t === 'srt') {
-            (data.segments || []).forEach((s, i) => {
-                const toTime = (sec) => new Date(sec * 1000).toISOString().substr(11, 12).replace('.', ',');
-                content += `${i+1}\n${toTime(s.start)} --> ${toTime(s.end)}\n${s.text}\n\n`;
-            });
-        }
-        
-        const blob = new Blob([content], {type: 'text/plain'});
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `transcript.${t}`; a.click();
+        let content = ""; const data = JSON.parse($('#jsonOutput').innerText || "{}");
+        if (t === 'json') content = JSON.stringify(data, null, 2);
+        else if (t === 'txt') (data.segments||[]).forEach(s => content += `[${s.start.toFixed(1)}s]: ${s.text}\n`);
+        else if (t === 'srt') (data.segments||[]).forEach((s, i) => { content += `${i+1}\n00:00:${s.start.toFixed(3).replace('.',',')} --> 00:00:${s.end.toFixed(3).replace('.',',')}\n${s.text}\n\n`; });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], {type: 'text/plain'})); a.download = `transcript.${t}`; a.click();
     },
-
     startViz() {
         const cv = $('#audioVisualizer'); const ctx = cv.getContext('2d');
         const rsz = () => { cv.width = cv.parentElement.offsetWidth; cv.height = cv.parentElement.offsetHeight; };
@@ -500,17 +499,13 @@ const UI = {
             requestAnimationFrame(loop); AudioSys.analyser.getByteFrequencyData(arr);
             ctx.clearRect(0,0,cv.width,cv.height);
             const barW = (cv.width/arr.length)*2.5; let x=0;
-            ctx.fillStyle = document.body.getAttribute('data-theme')=='dark'?'rgba(59,130,246,0.2)':'rgba(37,99,235,0.2)';
+            ctx.fillStyle = document.body.getAttribute('data-theme')=='dark'?'rgba(59,130,246,0.4)':'rgba(37,99,235,0.4)';
             for(let i=0; i<arr.length; i++) {
                 const h = (arr[i]/255)*cv.height;
-                ctx.fillRect(cv.width/2+x, (cv.height-h)/2, barW, h);
-                ctx.fillRect(cv.width/2-x, (cv.height-h)/2, barW, h);
-                x+=barW+1;
+                ctx.fillRect(cv.width/2+x, (cv.height-h)/2, barW, h); ctx.fillRect(cv.width/2-x, (cv.height-h)/2, barW, h); x+=barW+1;
             }
         }; loop();
     },
     clear() { $('#transcriptFeed').innerHTML = '<div class="empty-placeholder"><div class="placeholder-icon"><i class="fas fa-microphone-lines"></i></div><h3>Temizlendi</h3></div>'; Speaker.reset(); }
 };
-
-window.UI = UI;
-UI.init();
+window.UI = UI; UI.init();
