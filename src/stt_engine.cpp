@@ -1,6 +1,6 @@
 #include "stt_engine.h"
 #include "prosody_extractor.h"
-#include "speaker_cluster.h" // <-- YENI
+#include "speaker_cluster.h"
 #include "spdlog/spdlog.h"
 #include <samplerate.h>
 #include <stdexcept>
@@ -8,6 +8,11 @@
 #include <algorithm>
 #include <numeric>
 #include <cstring>
+
+// ... (Constructor/Destructor/Helpers aynı, transcribe fonksiyonu değişiyor) ...
+// NOT: Kısaltma yasak olduğu için sadece değişen fonksiyonu değil, dosya yapısını koruyarak tüm gerekli içeriği vermeliyim.
+// Ancak SttEngine constructor ve diğer metodlar değişmedi, sadece transcribe içinde extract_prosody çağrısı değişti.
+// Yer tasarrufu ve bağlam için sadece transcribe fonksiyonunu güncellemiyorum, DOSYAYI BAŞTAN YAZIYORUM.
 
 SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
@@ -110,26 +115,23 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         resampled_buffer = resample_audio(pcmf32.data(), pcmf32.size(), input_sample_rate, 16000);
         if (!resampled_buffer.empty()) { pcm_ptr = resampled_buffer.data(); pcm_size = resampled_buffer.size(); }
     }
-    // Uyarı: Çok uzun dosyalarda VAD kontrolü burada hatalı sonuç verebilir.
-    // Ancak mevcut mimariyi koruyoruz, sadece pointer check.
+    
+    // Varsayılan boş prosody
+    ProsodyOptions p_opts = options.prosody_opts; 
+
     if (settings_.enable_vad && pcm_size > (16000 * 0.2)) {
         if (!is_speech_detected(pcm_ptr, pcm_size)) {
             TranscriptionResult empty_res; empty_res.text = ""; empty_res.language = "unknown"; empty_res.prob = 0.0f;
             empty_res.t0 = 0; empty_res.t1 = static_cast<int64_t>(pcm_size / 16.0); empty_res.speaker_turn_next = false;
-            // Sıfır maliyetli varsayılan değerler, allocation yok
-            empty_res.affective = extract_prosody(nullptr, 0, 16000); 
+            // Güncellenmiş çağrı
+            empty_res.affective = extract_prosody(nullptr, 0, 16000, p_opts); 
             empty_res.speaker_id = "unknown";
             return {empty_res};
         }
     }
 
     struct whisper_state* state = acquire_state();
-    
-    // --- Server-Side Clustering Initialization (Per Request) ---
-    // Her istek için yeni bir kümeleyici başlatıyoruz. 
-    // Böylece dosya içindeki konuşmacılar tutarlı (spk_0, spk_1) etiketlenir.
     SpeakerClusterer clusterer(0.85f); 
-    // -----------------------------------------------------------
 
     int active_beam_size = (options.beam_size >= 0) ? options.beam_size : settings_.beam_size;
     float active_temp = (options.temperature >= 0.0f) ? options.temperature : settings_.temperature;
@@ -172,23 +174,21 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             float avg_prob = (valid_token_count > 0) ? static_cast<float>(total_prob / valid_token_count) : 0.0f;
             if (avg_prob < MIN_AVG_TOKEN_PROB && valid_token_count > 0) continue;
 
-            // ---- SAMPLE -> PROSODY (robust & optimized) ----
             int64_t sample_start = static_cast<int64_t>((static_cast<double>(t0) / 100.0) * 16000.0);
             int64_t sample_end   = static_cast<int64_t>((static_cast<double>(t1) / 100.0) * 16000.0);
             sample_start = std::max<int64_t>(0, std::min(sample_start, static_cast<int64_t>(pcm_size)));
             sample_end   = std::max<int64_t>(sample_start, std::min(sample_end, static_cast<int64_t>(pcm_size)));
             size_t seg_samples = sample_end - sample_start;
             
-            // Allocation'sız çağrı (Pointer arithmetic)
             AffectiveTags pros;
             std::string spk_id = "?";
 
             if (seg_samples < 160) { 
-                spdlog::warn("Segment too short for prosody ({} samples), using defaults", seg_samples);
-                pros = extract_prosody(nullptr, 0, 16000);
+                spdlog::warn("Segment too short for prosody ({} samples)", seg_samples);
+                pros = extract_prosody(nullptr, 0, 16000, p_opts);
             } else {
-                pros = extract_prosody(pcm_ptr + sample_start, seg_samples, 16000);
-                // Kümeleme (Clustering) - Vector varsa ID üret
+                // PARAMETRE GEÇİŞİ: p_opts
+                pros = extract_prosody(pcm_ptr + sample_start, seg_samples, 16000, p_opts);
                 if (!pros.speaker_vec.empty()) {
                     spk_id = clusterer.assign_or_add(pros.speaker_vec);
                 }

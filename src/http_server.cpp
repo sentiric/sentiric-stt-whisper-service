@@ -29,7 +29,7 @@ void HttpServer::setup_routes() {
     if (!ret) spdlog::warn("⚠️ Could not mount ./studio directory.");
     svr_.Get("/health", [this](const httplib::Request &, httplib::Response &res) {
         bool ready = engine_->is_ready();
-        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.4.0"}, {"api_compatibility", "openai-whisper"} };
+        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.5.0"}, {"api_compatibility", "openai-whisper"} };
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(response.dump(), "application/json"); res.status = ready ? 200 : 503;
     });
@@ -40,13 +40,25 @@ void HttpServer::setup_routes() {
         if (!req.has_file("file")) { res.status = 400; res.set_content(json{{"error", "No file uploaded."}}.dump(), "application/json"); return; }
         const auto& file = req.get_file_value("file");
         RequestOptions opts;
+        
+        // --- Standart Parametreler ---
         if (req.has_file("language")) opts.language = req.get_file_value("language").content;
         if (req.has_file("prompt")) opts.prompt = req.get_file_value("prompt").content;
         if (req.has_file("temperature")) { try { opts.temperature = std::stof(req.get_file_value("temperature").content); } catch(...) {} }
         if (req.has_file("beam_size")) { try { opts.beam_size = std::stoi(req.get_file_value("beam_size").content); } catch(...) {} }
         if (req.has_file("translate")) { std::string val = req.get_file_value("translate").content; opts.translate = (val == "true" || val == "1"); }
         if (req.has_file("diarization")) { std::string val = req.get_file_value("diarization").content; opts.enable_diarization = (val == "true" || val == "1"); }
-        spdlog::info("🎤 Processing: {}b | Lang: {} | Temp: {:.1f}", file.content.size(), opts.language, opts.temperature);
+        
+        // --- YENİ: Gelişmiş DSP Parametreleri ---
+        if (req.has_file("prosody_lpf_alpha")) { 
+            try { opts.prosody_opts.lpf_alpha = std::stof(req.get_file_value("prosody_lpf_alpha").content); } catch(...) {} 
+        }
+        if (req.has_file("prosody_pitch_gate")) { 
+            try { opts.prosody_opts.gender_threshold = std::stof(req.get_file_value("prosody_pitch_gate").content); } catch(...) {} 
+        }
+
+        spdlog::info("🎤 Processing: {}b | Lang: {} | LPF: {:.3f}", file.content.size(), opts.language, opts.prosody_opts.lpf_alpha);
+        
         try {
             auto start_time = std::chrono::steady_clock::now();
             DecodedAudio audio = parse_wav_robust(file.content);
@@ -62,7 +74,6 @@ void HttpServer::setup_routes() {
                 segments.push_back({
                     {"text", safe_text}, {"start", (double)r.t0 / 100.0}, {"end", (double)r.t1 / 100.0}, {"probability", r.prob},
                     {"speaker_turn_next", r.speaker_turn_next}, 
-                    // YENİ: Speaker ID
                     {"speaker_id", r.speaker_id},
                     {"gender", aff.gender_proxy}, {"emotion", aff.emotion_proxy},
                     {"arousal", aff.arousal}, {"valence", aff.valence},

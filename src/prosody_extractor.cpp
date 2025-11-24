@@ -29,7 +29,7 @@ static float soft_norm(float val, float min_v, float max_v) {
     return std::max(0.0f, std::min(1.0f, norm));
 }
 
-AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sample_rate) {
+AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sample_rate, const ProsodyOptions& opts) {
     AffectiveTags out;
     
     if (n_samples < 160 || pcm_data == nullptr) { 
@@ -53,29 +53,24 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     int peak_count = 0; 
     float last_rms = 0;
 
-    // --- AGGRESSIVE LPF (Erkek sesi fundamental'ı yakalamak için) ---
-    // Alpha = 0.07 ~ 180-200Hz Cutoff @ 16kHz
-    // Bu, 200Hz üzerindeki harmonikleri ciddi şekilde bastırır.
+    // --- PARAMETRİK LPF ---
     float lpf_val = 0.0f;
-    const float lpf_alpha = 0.07f; 
+    const float lpf_alpha = opts.lpf_alpha; // Dinamik Parametre
 
     for (size_t i = 0; i + frame_shift <= n_samples; i += frame_shift) {
         float r0 = 0;
         float max_amp = 0.0f;
         
-        // ZCR için filtrelenmiş buffer
         float filtered_frame[1600]; 
         int safe_frame_size = std::min(frame_shift, 1600);
 
         for (int k = 0; k < safe_frame_size; ++k) {
             float raw_val = pcm_data[i+k];
             
-            // RMS (Ham veri - Enerji)
             float abs_val = std::abs(raw_val);
             if (abs_val > max_amp) max_amp = abs_val;
             r0 += raw_val * raw_val;
 
-            // LPF (Pitch tespiti için)
             lpf_val += lpf_alpha * (raw_val - lpf_val);
             filtered_frame[k] = lpf_val;
         }
@@ -86,27 +81,19 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
         if (rms > 0.05f && last_rms <= 0.05f) peak_count++;
         last_rms = rms;
 
-        // --- Center Clipped ZCR (LPF Sinyal Üzerinden) ---
-        // LPF'den geçtiği için sinyal genliği düşecektir, threshold'u buna göre ayarla.
-        // Filtrelenmiş sinyalin max genliğini bilmiyoruz ama kabaca ham genliğin %10-20'si kalmıştır.
-        // Clipping eşiğini çok düşük tutarsak gürültüyü sayarız, çok yüksek tutarsak LPF sinyalini kaçırırız.
-        // Adaptive threshold: RMS'in %10'u.
+        // --- Center Clipped ZCR ---
         float clipping_threshold = std::max(0.002f, rms * 0.1f); 
 
         int cycles = 0;
         bool is_positive = false; 
         bool initialized = false;
-
-        // Standard ZCR (Timbre özelliği için - Ham veriden değil LPF'den bakmak daha temiz sonuç veriyor şimdilik)
         int standard_zcr_count = 0;
         
         for (int k = 1; k < safe_frame_size; ++k) {
-            float val = filtered_frame[k]; // LPF Sinyal
+            float val = filtered_frame[k]; 
             
-            // Standard ZCR (LPF'li sinyal üzerinde daha az gürültülüdür)
             if ((val >= 0) != (filtered_frame[k-1] >= 0)) standard_zcr_count++;
 
-            // Schmitt Trigger Logic
             if (!initialized) {
                 if (val > clipping_threshold) { is_positive = true; initialized = true; }
                 else if (val < -clipping_threshold) { is_positive = false; initialized = true; }
@@ -123,18 +110,17 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
         zcrs.push_back(zcr_val);
 
         // --- Pitch Calculation ---
-        // RMS > 0.01 (Çok sessiz yerleri atla)
         if (rms > 0.01f && cycles > 0) {
             float duration = static_cast<float>(frame_shift) / sample_rate;
             float estimated_f0 = cycles / duration; 
 
-            // Filtre aralığı: 60 - 500 Hz
-            if(estimated_f0 >= 60.0f && estimated_f0 <= 500.0f) {
+            // Dinamik Pitch Range
+            if(estimated_f0 >= opts.min_pitch && estimated_f0 <= opts.max_pitch) {
                 f0s.push_back(estimated_f0);
             }
         }
 
-        // --- Spectral Centroid (Ham veri - Timbre) ---
+        // --- Spectral Centroid ---
         float power = 0, weighted = 0;
         for (int k = 1; k < safe_frame_size; ++k) {
             float diff = std::abs(pcm_data[i + k] - pcm_data[i + k - 1]);
@@ -146,21 +132,17 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
 
     // --- İstatistikler ---
     out.pitch_mean = vector_median(f0s); 
-    out.pitch_std  = f0s.empty() ? 0.0f : vector_stdev(f0s, vector_mean(f0s)); // StdDev hala Mean üzerinden hesaplanmalı
+    out.pitch_std  = f0s.empty() ? 0.0f : vector_stdev(f0s, vector_mean(f0s));
     out.energy_mean = rmses.empty() ? 0.01f : vector_mean(rmses);
     out.energy_std  = rmses.empty() ? 0.00f : vector_stdev(rmses, out.energy_mean);
     out.spectral_centroid = scs.empty() ? 50.0f : vector_mean(scs);
     out.zero_crossing_rate = zcrs.empty() ? 0.1f : vector_mean(zcrs);
 
-    // --- Heuristic: Harmonik Düzeltme (V2) ---
-    // Eğer pitch kadın aralığındaysa (>165Hz) AMA spectral centroid düşükse (<70),
-    // bu muhtemelen boğuk/kalın bir erkek sesidir ve bulduğumuz pitch 2. harmoniktir.
-    // 2. Harmonik = 2 * Fundamental Freq. -> Yarıya bölmeliyiz.
-    if (out.pitch_mean > 165.0f) {
+    // --- Heuristic: Harmonik Düzeltme ---
+    if (out.pitch_mean > (opts.gender_threshold - 5.0f)) {
          if (out.spectral_centroid < 75.0f) {
-             out.pitch_mean *= 0.5f; // Oktav düşür
+             out.pitch_mean *= 0.5f; 
          }
-         // Ek koruma: Çok yüksek pitch (400Hz) zaten genelde hatadır.
          else if (out.pitch_mean > 350.0f) {
              out.pitch_mean *= 0.5f;
          }
@@ -170,11 +152,11 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     float speech_rate = (duration_sec > 0) ? (float)peak_count / duration_sec : 0.0f; 
 
     // --- Classification Rules ---
-    // Eşik: 170Hz (Agresif LPF sonrası erkek sesleri daha net 100-140Hz bandına oturur)
+    // Dinamik Eşik Kullanımı
     if (out.pitch_mean == 0.0f) {
         out.gender_proxy = "?";
     } else {
-        out.gender_proxy = (out.pitch_mean > 170.0f) ? "F" : "M";
+        out.gender_proxy = (out.pitch_mean > opts.gender_threshold) ? "F" : "M";
     }
 
     float norm_energy = soft_norm(out.energy_mean, 0.01f, 0.25f);

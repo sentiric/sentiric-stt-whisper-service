@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include <string>
-#include <cstddef> // size_t için
+#include <cstddef>
 
 struct AffectiveTags {
     std::string gender_proxy;   // "M" / "F"
@@ -17,5 +17,13 @@ struct AffectiveTags {
     std::vector<float> speaker_vec; // 8-D
 };
 
-// Optimization: Pass pointer + size instead of copying vector
-AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sample_rate);
+// YENİ: DSP Parametreleri Yapısı
+struct ProsodyOptions {
+    float lpf_alpha = 0.07f;        // Low-Pass Filter gücü (Düşük = Daha agresif filtre)
+    float gender_threshold = 170.0f; // Erkek/Kadın ayrım frekansı (Hz)
+    float min_pitch = 60.0f;
+    float max_pitch = 500.0f;
+};
+
+// Fonksiyon imzası güncellendi
+AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sample_rate, const ProsodyOptions& opts);

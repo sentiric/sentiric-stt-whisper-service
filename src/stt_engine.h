@@ -2,7 +2,7 @@
 #include "config.h"
 #include "whisper.h"
 #include "prosody_extractor.h"
-#include "speaker_cluster.h" // <-- YENI: Dahil edildi
+#include "speaker_cluster.h"
 #include <vector>
 #include <string>
 #include <mutex>
@@ -25,6 +25,9 @@ struct RequestOptions {
     float temperature = -1.0f;
     int beam_size = -1;
     int best_of = -1;
+    
+    // YENİ: Advanced DSP Options
+    ProsodyOptions prosody_opts;
 };
 
 struct TranscriptionResult {
@@ -35,14 +38,12 @@ struct TranscriptionResult {
     int64_t t1;
     bool speaker_turn_next;
     std::vector<TokenData> tokens;
-    // ---- zero-cost affective proxies ----
     std::string gender_proxy;
     std::string emotion_proxy;
     float arousal = 0.0f;
     float valence = 0.0f;
-    AffectiveTags affective; // tüm feature'lar
-    // ---- speaker identity ----
-    std::string speaker_id; // <-- YENI: Server-side clustering ID
+    AffectiveTags affective;
+    std::string speaker_id;
 };
 
 class SttEngine {
