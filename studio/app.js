@@ -194,6 +194,8 @@ const UI = {
         const c = $('#transcriptFeed');
         $('.empty-placeholder')?.remove();
         const segs = data.segments && data.segments.length ? data.segments : [{text: data.text, start:0, speaker_vec:[], gender:'?'}];
+        
+        // DOM Update
         segs.forEach((seg, idx) => {
             const isBad = seg.text.match(/^(\[|\(|\-Altyazı)/) || seg.text.length < 2;
             const spk = Speaker.identify(seg.speaker_vec, {gender: seg.gender});
@@ -203,7 +205,6 @@ const UI = {
             const pPct = Math.min(100, (vec[0]||0)*100); const ePct = Math.min(100, (vec[2]||0)*100);
             let waves = ''; for(let i=0; i<12; i++) waves += `<div class="wave-line" style="height:${Math.random()*8+4}px"></div>`;
 
-            // YENİ: İndirme Butonu Mini Player İçinde
             const playerHtml = url && idx===segs.length-1 ? `
                 <div class="mini-player">
                     <button class="player-btn" onclick="UI.play(this,'${url}')"><i class="fas fa-play"></i></button>
@@ -230,7 +231,7 @@ const UI = {
             c.insertAdjacentHTML('beforeend', html);
         });
         
-        // AUTO SCROLL FIX
+      // AUTO SCROLL FIX
         requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
     },
 

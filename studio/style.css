@@ -14,6 +14,12 @@
 * { box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; }
 body { margin: 0; background: var(--bg-body); color: var(--text-main); font-family: var(--font-ui); height: 100dvh; overflow: hidden; font-size: 13px; line-height: 1.5; }
 
+/* --- SCROLLBAR CUSTOMIZATION (YENİ) --- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
 .app-layout { display: grid; grid-template-columns: var(--sidebar-w) 1fr var(--sidebar-w); height: 100%; width: 100%; }
 
 /* Sidebars */
@@ -56,7 +62,15 @@ input[type=range] { width: 100%; height: 4px; background: var(--border); border-
 .sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
 
 /* Transcript */
-.transcript-container { flex: 1; padding: 24px; overflow-y: auto; padding-bottom: 140px; scroll-behavior: smooth; }
+.transcript-container { 
+    flex: 1; 
+    padding: 24px; 
+    overflow-y: auto; 
+    padding-bottom: 140px; /* Dock için alt boşluk */
+    scroll-behavior: smooth; 
+    min-height: 0; /* Flexbox scroll bug fix */
+    width: 100%;
+}
 .speaker-row { display: flex; gap: 16px; margin-bottom: 24px; max-width: 900px; margin-left: auto; margin-right: auto; animation: slideUp 0.3s ease; }
 @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .avatar-box { width: 42px; height: 42px; border-radius: 12px; background: var(--bg-card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; position: relative; cursor: pointer; transition: transform 0.2s; box-shadow: var(--shadow-card); }
@@ -81,11 +95,67 @@ input[type=range] { width: 100%; height: 4px; background: var(--border); border-
 .bar-fill { height: 100%; border-radius: 2px; }
 
 /* Dock */
-.dock-wrapper { position: fixed; bottom: 30px; left: 0; right: 0; display: flex; justify-content: center; pointer-events: none; z-index: 50; padding-bottom: env(safe-area-inset-bottom); }
-.dock { width: 500px; height: var(--dock-h); pointer-events: auto; background: var(--bg-dock); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; box-shadow: var(--shadow-dock); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; position: relative; overflow: hidden; }
-#audioVisualizer { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.2; pointer-events: none; }
-.dock-left, .dock-right { display: flex; gap: 10px; z-index: 2; width: 80px; justify-content: center; }
-.dock-center { position: relative; z-index: 2; display: flex; justify-content: center; flex-direction: column; align-items: center; }
+.dock-wrapper { 
+    position: fixed; 
+    bottom: 30px; 
+    left: 0; 
+    right: 0; 
+    display: flex; 
+    justify-content: center; 
+    pointer-events: none; 
+    z-index: 50; 
+    padding: 0 20px; /* Kenarlardan boşluk */
+    padding-bottom: env(safe-area-inset-bottom); 
+}
+
+.dock {
+    width: 100%; /* Esnek genişlik */
+    max-width: 640px; /* Maksimum genişlik artırıldı */
+    height: var(--dock-h); 
+    pointer-events: auto;
+    background: var(--bg-dock); 
+    backdrop-filter: blur(24px); 
+    border: 1px solid rgba(255,255,255,0.08); 
+    border-radius: 24px;
+    box-shadow: var(--shadow-dock); 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between;
+    padding: 0 24px; 
+    position: relative; 
+    overflow: hidden;
+    transition: all 0.3s ease; /* Animasyonlu geçiş */
+}
+
+#audioVisualizer { 
+    position: absolute; 
+    inset: 0; 
+    width: 100%; 
+    height: 100%; 
+    opacity: 0.2; 
+    pointer-events: none; 
+    z-index: 0; /* En altta kalsın */
+}
+
+/* Dock İç Elemanları (Z-Index Artırıldı) */
+.dock-left, .dock-right { 
+    display: flex; 
+    gap: 12px; 
+    z-index: 2; 
+    flex: 1; /* Eşit alan dağılımı */
+}
+.dock-right { justify-content: flex-end; }
+.dock-left { justify-content: flex-start; }
+
+.dock-center { 
+    position: relative; 
+    z-index: 2; 
+    display: flex; 
+    justify-content: center; 
+    flex-direction: column; 
+    align-items: center; 
+    flex: 0 0 auto; /* Merkez sabit kalsın */
+}
 
 /* Record Button & Timer */
 .record-fab { width: 68px; height: 68px; border-radius: 50%; background: var(--text-main); color: var(--bg-body); font-size: 24px; border: none; cursor: pointer; display: grid; place-items: center; box-shadow: 0 8px 24px rgba(0,0,0,0.15); transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); position: relative; }
@@ -93,7 +163,27 @@ input[type=range] { width: 100%; height: 4px; background: var(--border); border-
 .record-fab.recording { background: var(--danger); color: white; border-radius: 24px; } 
 
 /* Timer (NEW POSITION) */
-.timer-pill { position: absolute; top: -40px; background: var(--bg-dock); border: 1px solid var(--border); padding: 4px 10px; border-radius: 20px; font-family: var(--font-mono); font-size: 12px; font-weight: 700; opacity: 0; transition: 0.3s; transform: translateY(10px); color: var(--danger); box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+.timer-pill { 
+    position: absolute; 
+    top: -48px; /* Biraz daha yukarı */
+    background: var(--bg-dock); 
+    border: 1px solid var(--danger); /* Kayıt rengi border */
+    color: var(--danger);
+    padding: 6px 12px; 
+    border-radius: 20px; 
+    font-family: var(--font-mono); 
+    font-size: 13px; 
+    font-weight: 700; 
+    opacity: 0; 
+    transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
+    transform: translateY(10px) scale(0.9); 
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    pointer-events: none;
+}
+.record-fab.recording + .timer-pill, .timer-pill.active { 
+    opacity: 1; 
+    transform: translateY(0) scale(1); 
+}
 .record-fab.recording + .timer-pill, .timer-pill.active { opacity: 1; transform: translateY(0); }
 
 /* Mobile */
