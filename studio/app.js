@@ -362,7 +362,7 @@ const UI = {
                     if(w.probability < 0.5) confClass = "low";
                     else if(w.probability < 0.75) confClass = "mid";
                     return `<span class="w" data-start="${w.start}" data-end="${w.end}" data-prob="${(w.probability*100).toFixed(0)}%" data-conf="${confClass}">${w.word}</span>`;
-                }).join(" ");
+                }).join(""); // <--- FIX: join(" ") yerine join("")
             } else {
                 textHtml = seg.text;
             }
