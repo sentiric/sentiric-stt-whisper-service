@@ -138,10 +138,12 @@
             <div class="header-actions">
                 <button class="action-btn theme-toggle" title="Tema"><i class="fas fa-moon"></i></button>
                 <div class="sep"></div>
-                <button class="action-btn" onclick="ui.export('json')">JSON</button>
-                <button class="action-btn" onclick="ui.export('txt')">TXT</button>
+                <!-- DÜZELTME: ui -> UI (Büyük Harf) -->
+                <button class="action-btn" onclick="UI.export('json')">JSON</button>
+                <button class="action-btn" onclick="UI.export('txt')">TXT</button>
                 <div class="sep"></div>
-                <button class="action-btn danger" onclick="ui.clear()"><i class="fas fa-trash"></i></button>
+                <!-- DÜZELTME: ui -> UI (Büyük Harf) -->
+                <button class="action-btn danger" onclick="UI.clear()"><i class="fas fa-trash"></i></button>
             </div>
         </header>
 
@@ -220,7 +222,8 @@
             <div class="json-panel">
                 <div class="panel-header">
                     <span>CANLI JSON ÇIKTISI</span>
-                    <button class="copy-btn" onclick="ui.copyJson()"><i class="far fa-copy"></i></button>
+                    <!-- DÜZELTME: ui -> UI (Büyük Harf) -->
+                    <button class="copy-btn" onclick="UI.copyJson()"><i class="far fa-copy"></i></button>
                 </div>
                 <pre id="jsonOutput">Bekleniyor...</pre>
             </div>

@@ -60,7 +60,8 @@ class SpeakerSystem {
         const lr = c.count < 5 ? 0.3 : 0.05; // Başta hızlı öğren, sonra sabitle
         for(let i=0; i<8; i++) c.centroid[i] = c.centroid[i]*(1-lr) + vector[i]*lr;
         c.count++;
-        if(meta.gender && meta.gender !== '?') c.gender = meta.gender; // Cinsiyeti güncelle
+        // Gender smoothing: Sadece '?' ise güncelle, yoksa önceki karar daha stabil olabilir
+        if(meta.gender && meta.gender !== '?' && c.gender === '?') c.gender = meta.gender; 
     }
 
     rename(id) {
@@ -351,4 +352,6 @@ const UI = {
     }
 };
 
+// DÜZELTME: Global Erişime Aç
+window.UI = UI;
 UI.init();
