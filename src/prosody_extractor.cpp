@@ -24,7 +24,6 @@ static float soft_norm(float val, float min_v, float max_v) {
 AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sample_rate) {
     AffectiveTags out;
     
-    // Yetersiz veri kontrolü
     if (n_samples < 160 || pcm_data == nullptr) { 
         out.gender_proxy = "?"; out.emotion_proxy = "neutral";
         out.pitch_mean = 0; out.pitch_std = 0;
@@ -46,37 +45,65 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     int peak_count = 0; 
     float last_rms = 0;
 
+    // --- LPF (Low Pass Filter) State ---
+    // Basit One-Pole Smoothing: y[i] += alpha * (x[i] - y[i])
+    // Alpha 0.15 ~ 400Hz cutoff @ 16kHz (kabaca)
+    float lpf_val = 0.0f;
+    const float lpf_alpha = 0.15f; 
+
     for (size_t i = 0; i + frame_shift <= n_samples; i += frame_shift) {
-        // --- RMS ---
+        // --- RMS & LPF Preparation ---
         float r0 = 0;
-        for (int k = 0; k < frame_shift; ++k) {
-            float val = pcm_data[i+k];
-            r0 += val * val;
+        
+        // Geçici LPF tamponu (Bu frame için)
+        // ZCR'yi bu filtrelenmiş sinyal üzerinden hesaplayacağız.
+        // Stack allocation (hızlı)
+        float filtered_frame[1600]; // Max 100ms buffer (16kHz için yeterli)
+        int safe_frame_size = std::min(frame_shift, 1600);
+
+        for (int k = 0; k < safe_frame_size; ++k) {
+            float raw_val = pcm_data[i+k];
+            
+            // 1. RMS (Ham veri üzerinden hesaplanmalı - Enerji)
+            r0 += raw_val * raw_val;
+
+            // 2. Low Pass Filter (Pitch tespiti için)
+            lpf_val += lpf_alpha * (raw_val - lpf_val);
+            filtered_frame[k] = lpf_val;
         }
-        float rms = std::sqrt(r0 / frame_shift);
+        
+        float rms = std::sqrt(r0 / safe_frame_size);
         rmses.push_back(rms);
 
         if (rms > 0.05f && last_rms <= 0.05f) peak_count++;
         last_rms = rms;
 
-        // --- Zero Crossing ---
+        // --- Zero Crossing (LPF Üzerinden) ---
         int zcr = 0;
-        for (int k = 1; k < frame_shift; ++k)
-            if ((pcm_data[i + k] >= 0) != (pcm_data[i + k - 1] >= 0)) ++zcr;
-        float zcr_val = static_cast<float>(zcr) / frame_shift;
+        for (int k = 1; k < safe_frame_size; ++k) {
+            // Ham veri yerine filtrelenmiş veriye bakıyoruz
+            if ((filtered_frame[k] >= 0) != (filtered_frame[k - 1] >= 0)) ++zcr;
+        }
+        float zcr_val = static_cast<float>(zcr) / safe_frame_size;
         zcrs.push_back(zcr_val);
 
-        // Pitch Proxy (ZCR based)
-        // DÜZELTME: RMS Threshold düşürüldü (0.005) çünkü 150Hz default sorunu
-        // sessiz veya düşük enerjili segmentlerde pitch'in hiç bulunamamasından kaynaklanıyor.
-        if (rms > 0.005f && zcr_val > 0.01f && zcr_val < 0.4f) {
-            float estimated_f0 = zcr_val * sample_rate * 0.5f; 
-            if(estimated_f0 > 60 && estimated_f0 < 450) f0s.push_back(estimated_f0);
+        // --- Pitch Proxy ---
+        // RMS Eşiği: Çok sessiz yerlerde pitch arama
+        if (rms > 0.005f) {
+            // ZCR formülü: (Crossings / Time) * 0.5 = Frequency
+            // 16kHz * 0.5 = 8000.
+            float estimated_f0 = zcr_val * 8000.0f; 
+
+            // Filtre aralığını biraz genişlettik (50Hz - 600Hz)
+            // Kadın sesleri 200-350Hz bandına çıkabilir.
+            if(estimated_f0 > 50.0f && estimated_f0 < 600.0f) {
+                f0s.push_back(estimated_f0);
+            }
         }
 
-        // --- Spectral Centroid ---
+        // --- Spectral Centroid (Ham veri üzerinden - Timbre) ---
         float power = 0, weighted = 0;
-        for (int k = 1; k < frame_shift; ++k) {
+        for (int k = 1; k < safe_frame_size; ++k) {
             float diff = std::abs(pcm_data[i + k] - pcm_data[i + k - 1]);
             weighted += diff * k; power += diff;
         }
@@ -85,9 +112,6 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     }
 
     // İstatistikler
-    // DÜZELTME: Varsayılan değer (fallback) "0" olarak ayarlandı.
-    // 150.0f vermek "Default Male" olarak algılanmasına neden oluyor.
-    // Eğer pitch bulunamazsa 0 dönmeli, gender "?" olmalı.
     out.pitch_mean = f0s.empty() ? 0.0f : vector_mean(f0s);
     out.pitch_std  = f0s.empty() ? 0.0f : vector_stdev(f0s, out.pitch_mean);
     out.energy_mean = rmses.empty() ? 0.01f : vector_mean(rmses);
@@ -95,18 +119,23 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     out.spectral_centroid = scs.empty() ? 50.0f : vector_mean(scs);
     out.zero_crossing_rate = zcrs.empty() ? 0.1f : vector_mean(zcrs);
 
-    if (out.pitch_mean > 240.0f) {
+    // Heuristic: Oktav hatası düzeltme (Hala gerekebilir)
+    if (out.pitch_mean > 350.0f) {
          out.pitch_mean *= 0.5f; 
     }
 
     float duration_sec = (float)n_samples / sample_rate;
     float speech_rate = (duration_sec > 0) ? (float)peak_count / duration_sec : 0.0f; 
 
-    // Classification Rules
-    // DÜZELTME: Pitch 0 ise (bulunamadıysa) '?' ata, Erkek deme.
+    // --- Classification Rules ---
+    // Pitch 0 ise (Bulunamadıysa)
     if (out.pitch_mean == 0.0f) {
-        out.gender_proxy = "?";
+        // Fallback: Sadece spektral parlaklığa bakarak tahmin yürüt (Çok kaba bir tahmin)
+        // Kadın sesleri genelde daha "parlak" (yüksek centroid) olur.
+        if (out.spectral_centroid > 85.0f) out.gender_proxy = "F"; // Güvenli tahmin
+        else out.gender_proxy = "?"; 
     } else {
+        // Eşik değeri: 175Hz (Ortalama ayrım noktası)
         out.gender_proxy = (out.pitch_mean > 175.0f) ? "F" : "M";
     }
 
