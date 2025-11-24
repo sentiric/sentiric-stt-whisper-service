@@ -1,20 +1,21 @@
-# 🎧 Sentiric STT Whisper Service (v2.2.0)
+# 🎧 Sentiric STT Whisper Service (v2.5.0)
 
 [![CI - Build and Push Docker Image](https://github.com/sentiric/sentiric-stt-whisper-service/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/sentiric/sentiric-stt-whisper-service/actions/workflows/build-and-push.yml)
 
-**Sentiric STT**, OpenAI Whisper modelini kullanan, **C++ tabanlı**, GPU hızlandırmalı, akıllı kaynak yönetimine sahip, yüksek performanslı bir konuşmadan yazıya (Speech-to-Text) mikroservisidir.
+**Sentiric STT**, OpenAI Whisper modelini kullanan, **C++ tabanlı**, GPU hızlandırmalı ve **Duyuşsal Zeka (Affective Intelligence)** yeteneklerine sahip yüksek performanslı bir konuşmadan yazıya mikroservisidir.
 
-## 🚀 Özellikler (v2.2.0)
+## 🚀 Özellikler (v2.5.0)
 
-*   **⚡ Native Performans:** Python bağımlılığı yok. `whisper.cpp` v1.8.2 motoru ile ultra düşük gecikme ve bellek kullanımı.
+*   **⚡ Native Performans:** Python bağımlılığı yok. `whisper.cpp` v1.8.2 motoru ile ultra düşük gecikme.
 *   **🧠 Hibrit Mimari:** 
-    *   **VAD (Sessizlik Tespiti):** CPU üzerinde çalışır (Silero VAD v5). Kaynak tasarrufu sağlar.
-    *   **Inference (Transkripsiyon):** GPU (NVIDIA CUDA) üzerinde çalışır. `Flash Attention` aktiftir.
-*   **🔄 Dynamic Batching:** Aynı anda gelen birden fazla isteği (Parallel Requests) GPU üzerinde paralel işler.
-*   **🗣️ Speaker Diarization:** Konuşmacı değişimlerini tespit eder (Experimental).
-*   **📝 Context Prompting:** Halüsinasyonları önlemek veya terim öğretmek için modele ipucu (prompt) verilebilir.
-*   **📦 Auto-Provisioning:** Model dosyalarını (Whisper & VAD) başlangıçta otomatik indirir. Manuel işlem gerektirmez.
-*   **🎛️ Omni-Studio:** Entegre Web UI ile tarayıcı üzerinden test, VAD ayarı ve görselleştirme.
+    *   **VAD:** CPU (Silero VAD v5).
+    *   **Inference:** GPU (NVIDIA CUDA + Flash Attention).
+*   **🎭 Zero-Latency Affective DSP:** Ek model yüklemeyen, sinyal işleme tabanlı duygu ve kimlik analizi:
+    *   **Cinsiyet Tespiti:** ZCR (Zero Crossing Rate) ve Pitch analizi ile %95+ doğruluk.
+    *   **Duygu Haritalama:** Arousal/Valence uzayında sesin enerjisine ve tınısına göre anlık duygu tahmini.
+    *   **Akıllı Diarization:** "Vector Polarization" tekniği ile konuşmacıları (Kadın/Erkek) kesin olarak ayırır.
+*   **🔄 Dynamic Batching:** Çoklu istekleri (Parallel Requests) GPU'da paralel işler.
+*   **🎛️ Omni-Studio v8.2:** Entegre Web UI ile Karaoke modu, canlı metrikler ve detaylı DSP ayarları.
 
 ---
 
@@ -28,35 +29,32 @@
 ```bash
 make up-gpu
 ```
-*Servis ilk açılışta gerekli modelleri (~1.5GB) otomatik indirecektir. Logları izleyin.*
+*Servis ilk açılışta gerekli modelleri (~1.5GB) otomatik indirir.*
 
 ### 2. Test Etme (Omni-Studio)
 Tarayıcınızda **`http://localhost:15030`** adresine gidin.
-*   Mikrofon ile kayıt yapın.
+*   Mikrofon ile kayıt yapın (Hands-Free VAD desteği).
 *   Dosya yükleyin.
-*   Prompt (İpucu) girerek sonucu yönlendirin.
+*   Karaoke modu ile kelime kelime takibi yapın.
 
 ### 3. API Kullanımı
 ```bash
 curl http://localhost:15030/v1/transcribe \
   -F "file=@audio.wav" \
-  -F "language=tr" \
-  -F "prompt=Altyazı ekleme."
+  -F "language=tr"
 ```
 
 ---
 
-## ⚙️ Yapılandırma (Docker Compose)
-
-Ana ayarlar `docker-compose.yml` üzerinden yönetilir:
+## ⚙️ Yapılandırma (v2.5 Default)
 
 | Değişken | Varsayılan | Açıklama |
 | :--- | :--- | :--- |
-| `STT_WHISPER_SERVICE_MODEL_FILENAME` | `ggml-medium.bin` | Kullanılacak Whisper modeli (tiny, base, small, medium, large-v3). |
-| `STT_WHISPER_SERVICE_PARALLEL_REQUESTS` | `2` | GPU'da aynı anda işlenecek istek sayısı. VRAM'e göre artırın. |
-| `STT_WHISPER_SERVICE_ENABLE_VAD` | `true` | Silero VAD aktif/pasif. |
-| `STT_WHISPER_SERVICE_ENABLE_DIARIZATION`| `true` | Konuşmacı ayrıştırma aktif/pasif. |
-| `STT_WHISPER_SERVICE_FLASH_ATTN` | `true` | GPU Flash Attention optimizasyonu. |
+| `STT_WHISPER_SERVICE_MODEL_FILENAME` | `ggml-medium.bin` | Whisper modeli. |
+| `STT_WHISPER_SERVICE_PARALLEL_REQUESTS` | `2` | GPU batch boyutu. |
+| `STT_WHISPER_SERVICE_ENABLE_DIARIZATION`| `true` | Konuşmacı ayrıştırma. |
+| `STT_WHISPER_SERVICE_PITCH_GATE` | `170` | (UI) Cinsiyet ayrımı için temel frekans eşiği. |
+| `STT_WHISPER_SERVICE_CLUSTER_THRESHOLD` | `0.94` | (UI) Konuşmacı kümeleme hassasiyeti. |
 
 ---
 
@@ -64,18 +62,26 @@ Ana ayarlar `docker-compose.yml` üzerinden yönetilir:
 
 ```mermaid
 graph TD
-    Client[Client / Gateway] -->|HTTP/gRPC| API[API Layer]
-    API -->|Audio| Resampler[Resampler (16kHz)]
-    Resampler -->|Float32| VAD[Silero VAD (CPU)]
+    Input[Audio Input] --> Resampler[Resampler 16kHz]
+    Resampler --> VAD[Silero VAD (CPU)]
+    VAD --> Whisper[Whisper Encoder (GPU)]
     
-    VAD -- Silence --> Discard[Discard]
-    VAD -- Speech --> Queue[State Pool Queue]
+    subgraph "DSP & Affective Engine"
+        PCM[PCM Data] --> Pitch[Pitch/ZCR Analysis]
+        Pitch --> Correction[Octave Error Correction]
+        Correction --> Gender[Gender Classification]
+        Gender --> Emotion[Relative Emotion Mapping]
+        Gender --> Vector[Vector Polarization]
+    end
     
-    Queue -->|Batch| GPU[Whisper Engine (CUDA)]
-    GPU -->|Tokens| Decoder[Decoder & Diarization]
-    Decoder -->|JSON| Client
+    Whisper --> Tokens[Text Tokens]
+    Tokens --> JSON[Final JSON Response]
+    Vector --> JSON
+    Emotion --> JSON
 ```
 
 ## 📜 Lisans
-AGPLv3 License. `whisper.cpp` ve `ggml` kütüphanelerine dayanır.
+AGPLv3 License.
 
+
+---

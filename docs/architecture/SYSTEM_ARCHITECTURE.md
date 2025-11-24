@@ -1,44 +1,53 @@
-# 🏗️ Sistem Mimarisi (v2.0)
+# 🏗️ Sistem Mimarisi (v2.5.0)
 
-Sentiric STT Whisper Service, yüksek performanslı ses işleme ve transkripsiyon için tasarlanmış, C++ tabanlı bir mikroservistir.
+Sentiric STT Whisper Service, ses verisini sadece metne çevirmekle kalmaz, aynı zamanda konuşmacının kimliğini ve duygu durumunu da analiz eder.
 
-## 1. Mimari Bileşenler
+## 1. Veri Akış Şeması
 
 ```mermaid
 graph TD
-    Client[Client (Gateway/Agent)] -- gRPC Audio Stream --> gRPC_Server
-    Client -- HTTP REST (File) --> HTTP_Server
+    Client[Client / Omni-Studio] -->|WAV/PCM| Server[STT Service]
     
-    subgraph "STT Service Container"
-        gRPC_Server[gRPC Server]
-        HTTP_Server[HTTP Server]
+    subgraph "C++ Backend"
+        Server --> Pre[Preprocessing & VAD]
+        Pre -->|Speech Segments| Whisper[Whisper Inference]
+        Pre -->|Raw PCM| DSP[Prosody Extractor]
         
-        subgraph "Core Engine"
-            Resampler[LibSamplerate (8kHz -> 16kHz)]
-            WhisperEngine[Whisper.cpp Engine]
-            ModelMgr[Model Manager]
+        Whisper -->|Tokens & Timestamps| Merger[Result Merger]
+        
+        subgraph "DSP Engine"
+            DSP --> LPF[Low Pass Filter]
+            LPF --> Stats[Pitch/ZCR/Energy Calc]
+            Stats --> Heuristic[ZCR Gender Check & Octave Fix]
+            Heuristic --> Emotion[Adaptive Emotion Mapping]
+            Heuristic --> Vector[Vector Polarization]
         end
         
-        ModelFiles[(GGUF Models)]
+        Vector --> Cluster[Speaker Clusterer (0.94 Threshold)]
+        
+        DSP --> Merger
+        Cluster --> Merger
     end
     
-    gRPC_Server --> Resampler
-    HTTP_Server --> Resampler
-    Resampler --> WhisperEngine
-    ModelMgr -- Loads --> WhisperEngine
-    WhisperEngine -- Reads --> ModelFiles
+    Merger -->|Enriched JSON| Client
 ```
 
-## 2. Akış Mantığı
+## 2. Kritik Algoritmalar
 
-1.  **Girdi:** İstemci, gRPC (Stream) veya HTTP (POST) üzerinden ses verisi gönderir. Ses formatı genellikle 8kHz (Telephony) veya 16kHz'dir.
-2.  **Ön İşleme (Preprocessing):** `stt_engine`, gelen sesi analiz eder. Eğer örnekleme hızı 16kHz değilse, `libsamplerate` kullanarak yüksek kaliteli dönüşüm yapar. Ayrıca 16-bit INT verisini 32-bit FLOAT formatına normalize eder.
-3.  **Çıkarım (Inference):** `whisper.cpp`, ses verisini işler. Konfigürasyona göre `Beam Search` veya `Greedy` stratejisi kullanır. VAD (Voice Activity Detection), sessiz bölümleri filtreler.
-4.  **Çıktı:** Metin (Transcript), Dil ve Zaman Damgası bilgileri istemciye döner.
+### A. ZCR-Based Gender Correction
+```cpp
+bool is_low_zcr = (out.zero_crossing_rate < 0.024f); // Erkek İmzası
+if (is_high_pitch && is_low_zcr) {
+    out.pitch_mean *= 0.5f; // Oktav düzeltme
+    out.gender_proxy = "M"; // Cinsiyet zorlama
+}
+```
 
-## 3. Teknik Standartlar
-*   **Dil:** C++17
-*   **Concurrency:** Native Threading (Python GIL yok).
-*   **Build:** CMake + vcpkg + Docker Multi-stage.
-*   **Model Formatı:** GGML/GGUF (Whisper.cpp uyumlu).
+### B. Speaker Diarization Strategy
+Sistem, `whisper.cpp`'nin `tdrz` (tinydiarize) özelliğini **kullanmaz**. Bunun yerine kendi DSP vektörlerini kullanır:
+1.  Her segment için 8 boyutlu (Pitch, Energy, Spectral vb.) bir öznitelik vektörü çıkarılır.
+2.  Cinsiyete göre vektör uzayı manipüle edilir (Polarization).
+3.  `0.94` Cosine Similarity eşiği ile kümeleme yapılır.
 
+
+---
