@@ -281,14 +281,24 @@ const UI = {
         setTimeout(() => { t.style.opacity = '0'; t.style.bottom = '100px'; setTimeout(() => t.remove(), 300); }, 3000);
     },    
 
+    // --- RENDER GÜNCELLEMESİ (BATCH ISOLATION) ---
     render(data, dur, url) {
-        const c = $('#transcriptFeed'); $('.empty-placeholder')?.remove();
+        const c = $('#transcriptFeed');
+        $('.empty-placeholder')?.remove();
+        
         const segs = data.segments && data.segments.length ? data.segments : (data.text ? [{text: data.text, start:0, speaker_vec:[], gender:'?', words:[]}] : []);
         let renderedCount = 0;
+
+        // YENİ: Her render işlemi için benzersiz bir Batch ID oluştur
+        const batchId = `tx-batch-${Date.now()}`;
+        
+        // HTML string'i biriktireceğiz, direkt DOM'a basmayacağız
+        let batchHtml = `<div class="transcription-batch" id="${batchId}">`;
 
         segs.forEach((seg, idx) => {
             if (TextProcessor.isHallucination(seg.text)) return; 
             renderedCount++;
+
             const spk = Speaker.identify(seg.speaker_vec, {gender: seg.gender});
             const emo = { excited:"🔥", sad:"😢", angry:"😠" }[seg.emotion] || "";
             const gen = spk.gender === 'F' ? '👩' : (spk.gender === 'M' ? '👨' : '👤');
@@ -305,8 +315,15 @@ const UI = {
                 }).join(""); 
             } else { textHtml = seg.text; }
 
-            const playerHtml = url && idx===segs.length-1 ? `<div class="mini-player"><button class="player-btn" onclick="UI.play(this,'${url}', ${seg.start})"><i class="fas fa-play"></i></button><div class="wave-vis">${waves}</div><div class="sep" style="height:12px; margin:0 4px"></div><button class="player-btn" onclick="UI.downloadAudio('${url}')"><i class="fas fa-download"></i></button></div>` : '';
-            const html = `
+            const playerHtml = url && idx===segs.length-1 ? 
+                `<div class="mini-player">
+                    <button class="player-btn" onclick="UI.play(this,'${url}', ${seg.start})"><i class="fas fa-play"></i></button>
+                    <div class="wave-vis">${waves}</div>
+                    <div class="sep" style="height:12px; margin:0 4px"></div>
+                    <button class="player-btn" onclick="UI.downloadAudio('${url}')"><i class="fas fa-download"></i></button>
+                </div>` : '';
+
+            batchHtml += `
             <div class="speaker-row" id="seg-${Date.now()}-${idx}">
                 <div class="avatar-box" style="border-color:${spk.color}; color:${spk.color}" onclick="Speaker.rename('${spk.id}')">
                     ${gen}<div class="emo-tag">${emo}</div>
@@ -321,48 +338,76 @@ const UI = {
                     </div>
                 </div>
             </div>`;
-            c.insertAdjacentHTML('beforeend', html);
         });
         
-        if (renderedCount > 0) requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
+        batchHtml += `</div>`; // Kapanış div'i
+
+        if (renderedCount > 0) {
+            c.insertAdjacentHTML('beforeend', batchHtml);
+            requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
+        }
         return renderedCount;
     },
 
+    // --- PLAY GÜNCELLEMESİ (SCOPED KARAOKE) ---
     play(el, url, offset) {
         const i = el.querySelector('i');
+        
         if(window.audio) {
-            window.audio.pause(); if(window.playBtn) window.playBtn.className='fas fa-play';
+            window.audio.pause(); 
+            if(window.playBtn) window.playBtn.className='fas fa-play';
             if(window.karaokeFrame) cancelAnimationFrame(window.karaokeFrame);
+            // Sadece aktif kelimeleri temizle
             $$('.w.active-word').forEach(e => e.classList.remove('active-word'));
             if(window.playBtn === i) { window.audio = null; return; }
         }
-        window.audio = new Audio(url); window.playBtn = i; i.className = 'fas fa-pause'; 
+
+        window.audio = new Audio(url); 
+        window.playBtn = i; 
+        i.className = 'fas fa-pause'; 
+        
         window.audio.onerror = () => { UI.showToast("Ses dosyası oynatılamadı."); i.className = 'fas fa-play'; };
         window.audio.play().catch(e => console.warn(e));
 
-        // 🛠️ FIX: GLOBAL KARAOKE SCOPE
-        // Tüm kelimeleri seç, sadece o satırı değil
-        const allWords = Array.from(document.querySelectorAll('#transcriptFeed .w'));
+        // 🛠️ FIX: SADECE KENDİ BATCH'İNİ SEÇ
+        // play butonunun içinde bulunduğu en yakın 'transcription-batch' div'ini bul
+        const parentBatch = el.closest('.transcription-batch');
+        
+        // Eğer batch bulunduysa sadece oradaki kelimeleri al, yoksa (eski versiyonlar için) global al
+        const scopedWords = parentBatch 
+            ? Array.from(parentBatch.querySelectorAll('.w')) 
+            : Array.from(document.querySelectorAll('#transcriptFeed .w'));
 
-        if (ViewModes.karaoke && allWords.length > 0) {
+        if (ViewModes.karaoke && scopedWords.length > 0) {
             const checkKaraoke = () => {
                 if(!window.audio || window.audio.paused) return;
+                
                 const localT = window.audio.currentTime;
-                allWords.forEach(w => {
-                    const s = parseFloat(w.getAttribute('data-start')); const e = parseFloat(w.getAttribute('data-end'));
-                    if (localT >= s && localT <= e) { if (!w.classList.contains('active-word')) w.classList.add('active-word'); } 
-                    else { w.classList.remove('active-word'); }
+                
+                scopedWords.forEach(w => {
+                    const s = parseFloat(w.getAttribute('data-start')); 
+                    const e = parseFloat(w.getAttribute('data-end'));
+                    
+                    if (localT >= s && localT <= e) {
+                        if (!w.classList.contains('active-word')) w.classList.add('active-word');
+                    } else {
+                        w.classList.remove('active-word');
+                    }
                 });
+                
                 window.karaokeFrame = requestAnimationFrame(checkKaraoke);
             };
             window.karaokeFrame = requestAnimationFrame(checkKaraoke);
         }
 
         window.audio.onended = () => {
-            i.className = 'fas fa-play'; if(window.karaokeFrame) cancelAnimationFrame(window.karaokeFrame);
-            $$('.w.active-word').forEach(e => e.classList.remove('active-word')); window.audio = null;
+            i.className = 'fas fa-play'; 
+            if(window.karaokeFrame) cancelAnimationFrame(window.karaokeFrame);
+            $$('.w.active-word').forEach(e => e.classList.remove('active-word')); 
+            window.audio = null;
         };
     },
+    
     showLoading() {
         const id = 'tmp-'+Date.now();
         $('#transcriptFeed').insertAdjacentHTML('beforeend', `<div id="${id}" class="speaker-row" style="opacity:0.5"><div class="avatar-box"><i class="fas fa-circle-notch fa-spin"></i></div><div class="msg-content"><div class="bubble">İşleniyor...</div></div></div>`);
