@@ -19,6 +19,7 @@ static bool whisper_abort_callback_wrapper(void* user_data) {
 }
 
 SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
+
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
     spdlog::info("Loading Whisper model from: {}", model_path);
     struct whisper_context_params cparams = whisper_context_default_params();
@@ -28,22 +29,20 @@ SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
 #endif
     ctx_ = whisper_init_from_file_with_params(model_path.c_str(), cparams);
     if (!ctx_) throw std::runtime_error("Whisper model initialization failed");
+    
     int pool_size = settings_.parallel_requests;
     if (pool_size < 1) pool_size = 1;
-    spdlog::info("⚡ Initializing Dynamic Batching Pool with {} states...", pool_size);
     for(int i = 0; i < pool_size; ++i) {
         struct whisper_state* state = whisper_init_state(ctx_);
-        if(!state) throw std::runtime_error("Failed to allocate whisper state");
         state_pool_.push(state);
         all_states_.push_back(state);
     }
+    
     if (settings_.enable_vad) {
         std::string vad_path = settings_.model_dir + "/" + settings_.vad_model_filename;
         struct whisper_vad_context_params vparams = whisper_vad_default_context_params();
         vparams.use_gpu = false;
         vad_ctx_ = whisper_vad_init_from_file_with_params(vad_path.c_str(), vparams);
-        if (vad_ctx_) spdlog::info("✅ Native Silero VAD loaded successfully (CPU Mode).");
-        else spdlog::warn("⚠️ Failed to load VAD model at {}. VAD will be disabled.", vad_path);
     }
 }
 
@@ -75,17 +74,11 @@ std::vector<float> SttEngine::resample_audio(const float* input, size_t input_si
     long output_frames = static_cast<long>(input_size * ratio) + 100;
     std::vector<float> output(output_frames);
     SRC_DATA src_data;
-    src_data.data_in = input;
-    src_data.input_frames = static_cast<long>(input_size);
-    src_data.data_out = output.data();
-    src_data.output_frames = output_frames;
-    src_data.src_ratio = ratio;
-    src_data.end_of_input = 0;
+    src_data.data_in = input; src_data.input_frames = static_cast<long>(input_size);
+    src_data.data_out = output.data(); src_data.output_frames = output_frames;
+    src_data.src_ratio = ratio; src_data.end_of_input = 0;
     int error = src_simple(&src_data, SRC_SINC_FASTEST, 1);
-    if (error) {
-        spdlog::error("Resampling failed: {}", src_strerror(error));
-        return {};
-    }
+    if (error) return {};
     output.resize(src_data.output_frames_gen);
     return output;
 }
@@ -97,9 +90,7 @@ bool SttEngine::is_speech_detected(const float* pcm, size_t n_samples) {
 }
 
 std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
-    const std::vector<int16_t>& pcm16,
-    int input_sample_rate,
-    const RequestOptions& options)
+    const std::vector<int16_t>& pcm16, int input_sample_rate, const RequestOptions& options)
 {
     std::vector<float> pcmf32; pcmf32.reserve(pcm16.size());
     for (const auto& s : pcm16) pcmf32.push_back(static_cast<float>(s) / 32768.0f);
@@ -107,17 +98,10 @@ std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
 }
 
 std::vector<TranscriptionResult> SttEngine::transcribe(
-    const std::vector<float>& pcmf32,
-    int input_sample_rate,
-    const RequestOptions& options)
+    const std::vector<float>& pcmf32, int input_sample_rate, const RequestOptions& options)
 {
     if (!ctx_) return {};
-    
-    // --- EARLY CANCELLATION CHECK ---
-    if (options.should_abort && options.should_abort()) {
-        spdlog::warn("Transcription aborted before start.");
-        return {};
-    }
+    if (options.should_abort && options.should_abort()) return {};
 
     const float* pcm_ptr = pcmf32.data();
     size_t pcm_size = pcmf32.size();
@@ -131,9 +115,10 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
 
     if (settings_.enable_vad && pcm_size > (16000 * 0.2)) {
         if (!is_speech_detected(pcm_ptr, pcm_size)) {
+            // ... (Boş sonuç dönüşü aynı) ...
             TranscriptionResult empty_res; empty_res.text = ""; empty_res.language = "unknown"; empty_res.prob = 0.0f;
             empty_res.t0 = 0; empty_res.t1 = static_cast<int64_t>(pcm_size / 16.0); empty_res.speaker_turn_next = false;
-            empty_res.token_count = 0; // ZERO TOKENS
+            empty_res.token_count = 0;
             empty_res.affective = extract_prosody(nullptr, 0, 16000, p_opts); 
             empty_res.speaker_id = "unknown";
             return {empty_res};
@@ -141,24 +126,25 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     }
 
     struct whisper_state* state = acquire_state();
-    SpeakerClusterer clusterer(0.85f); 
+    
+    // -----------------------------------------------------------
+    // 🛠️ FIX: DIARIZATION THRESHOLD TUNING
+    // -----------------------------------------------------------
+    // Eski Değer: 0.85f (Çok toleranslı, herkesi aynı kişi sanıyor)
+    // Yeni Değer: 0.94f (Çok sıkı, en ufak farkta ayırır)
+    // Bu sayede Ezgi (F) ve Can (M) vektörleri benzeşse bile ayrılacak.
+    SpeakerClusterer clusterer(0.94f); 
+    // -----------------------------------------------------------
 
+    // ... (Whisper parametre ayarları aynı) ...
     int active_beam_size = (options.beam_size >= 0) ? options.beam_size : settings_.beam_size;
     float active_temp = (options.temperature >= 0.0f) ? options.temperature : settings_.temperature;
     int active_best_of = (options.best_of >= 0) ? options.best_of : settings_.best_of;
     whisper_sampling_strategy strategy = (active_beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
-    whisper_full_params wparams = whisper_full_default_params(strategy);
     
-    // --- ABORT CALLBACK SETUP ---
-    // NOT: options.should_abort const referans olduğu için cast sorunu yaşamamak adına
-    // const_cast veya mutable pointer kopyası kullanıyoruz.
-    // Ancak std::function move-only değil, kopyalanabilir.
+    whisper_full_params wparams = whisper_full_default_params(strategy);
     std::function<bool()> abort_fn = options.should_abort; 
-    if (abort_fn) {
-        wparams.abort_callback = whisper_abort_callback_wrapper;
-        wparams.abort_callback_user_data = &abort_fn;
-    }
-    // ----------------------------
+    if (abort_fn) { wparams.abort_callback = whisper_abort_callback_wrapper; wparams.abort_callback_user_data = &abort_fn; }
 
     wparams.print_realtime = false; wparams.print_progress = false; wparams.print_timestamps = !settings_.no_timestamps;
     wparams.print_special = false; wparams.token_timestamps = true; wparams.suppress_nst = settings_.suppress_nst;
@@ -183,10 +169,11 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             const int64_t t0 = whisper_full_get_segment_t0_from_state(state, i);
             const int64_t t1 = whisper_full_get_segment_t1_from_state(state, i);
             bool speaker_turn_next = whisper_full_get_segment_speaker_turn_next_from_state(state, i);
+            
+            // ... (Token extraction aynı) ...
             std::vector<TokenData> tokens;
             int n_tokens = whisper_full_n_tokens_from_state(state, i);
             double total_prob = 0.0; int valid_token_count = 0;
-            
             for (int j = 0; j < n_tokens; ++j) {
                 auto data = whisper_full_get_token_data_from_state(state, i, j);
                 const char* token_text = whisper_token_to_str(ctx_, data.id);
@@ -216,15 +203,12 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             }
 
             results.push_back({ std::string(text), target_lang, avg_prob, t0, t1, speaker_turn_next, tokens,
-                                valid_token_count, // Token Count
+                                valid_token_count,
                                 pros.gender_proxy, pros.emotion_proxy, pros.arousal, pros.valence, pros, spk_id });
         }
     } else { 
-        if (options.should_abort && options.should_abort()) {
-            spdlog::warn("Whisper processing aborted by user request.");
-        } else {
-            spdlog::error("Whisper processing failed with error code: {}", ret); 
-        }
+        if (options.should_abort && options.should_abort()) spdlog::warn("Whisper processing aborted.");
+        else spdlog::error("Whisper processing failed: {}", ret); 
     }
     release_state(state);
     return results;

@@ -2,13 +2,10 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
 // =============================================================================
-// 🧹 TEXT CLEANER & HALLUCINATION FILTER
+// 🧹 TEXT CLEANER
 // =============================================================================
 const TextProcessor = {
-    BANNED_PHRASES: [
-        "Sesli Betimleme", "Betimleme", "www.sebeder.com", "altyazı", "Senkron", 
-        "TRT", "Dizinin", "estetekal.com", "Altyazı", "Müzik", "[Music]"
-    ],
+    BANNED_PHRASES: ["Sesli Betimleme", "Betimleme", "www.sebeder.com", "altyazı", "Senkron", "TRT", "[Music]"],
     isHallucination(text) {
         if (!text || text.length < 2) return true;
         if (text.match(/^\[.*\]$/)) return true;
@@ -45,27 +42,18 @@ class SystemMonitor {
         const tokens = getVal('stt_tokens_generated_total');
         $('#totalReq').innerText = getVal('stt_requests_total');
         $('#totalAudio').innerText = (getVal('stt_audio_seconds_processed_total')/3600).toFixed(2);
-        
-        const now = Date.now();
-        const dt = (now - this.lastCheck) / 1000;
-        let tps = 0;
-        if (dt > 0 && this.lastTokens > 0) tps = Math.max(0, (tokens - this.lastTokens) / dt);
-        
+        const now = Date.now(); const dt = (now - this.lastCheck) / 1000;
+        let tps = 0; if (dt > 0 && this.lastTokens > 0) tps = Math.max(0, (tokens - this.lastTokens) / dt);
         this.lastTokens = tokens; this.lastCheck = now;
         $('#tpsVal').innerText = tps.toFixed(1);
-        this.history.push(tps); this.history.shift();
-        this.draw();
+        this.history.push(tps); this.history.shift(); this.draw();
     }
     draw() {
         if(!this.ctx) return;
         const w = this.canvas.width; const h = this.canvas.height; const ctx = this.ctx;
-        ctx.clearRect(0, 0, w, h);
-        ctx.beginPath(); ctx.strokeStyle = '#10b981'; ctx.lineWidth = 2;
+        ctx.clearRect(0, 0, w, h); ctx.beginPath(); ctx.strokeStyle = '#10b981'; ctx.lineWidth = 2;
         const max = Math.max(10, ...this.history); const step = w / (this.history.length - 1);
-        this.history.forEach((v, i) => { 
-            const y = h - (v/max * h * 0.9); 
-            if(i===0) ctx.moveTo(0, y); else ctx.lineTo(i*step, y); 
-        });
+        this.history.forEach((v, i) => { const y = h - (v/max * h * 0.9); if(i===0) ctx.moveTo(0, y); else ctx.lineTo(i*step, y); });
         ctx.stroke();
     }
 }
@@ -74,21 +62,15 @@ const SysMon = new SystemMonitor();
 // =============================================================================
 // 🧠 TEMPLATES
 // =============================================================================
-const Templates = {
-  general: "",
-  medical: "tıbbi terminoloji: anamnez, tanı, tedavi, farmakoloji terimleri",
-  legal: "hukuki terimler: davacı, davalı, hüküm, sözleşme",
-  tech: "teknik terimler: API, JSON, Docker, Kubernetes, commit"
-};
-
+const Templates = { general: "", medical: "tıbbi terminoloji: anamnez, tanı", legal: "hukuki terimler: davacı, hüküm", tech: "teknik terimler: API, JSON" };
 const ViewModes = { heatmap: false, karaoke: true };
 
 // =============================================================================
-// 🧠 SPEAKER SYSTEM
+// 🧠 SPEAKER SYSTEM (GÜNCELLENDİ)
 // =============================================================================
 class SpeakerSystem {
     constructor() {
-        this.threshold = 0.85; 
+        this.threshold = 0.94; // Frontend'de de sıkı tutuyoruz
         this.clusters = {}; 
         this.nextId = 0;
         this.colors = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4"];
@@ -121,7 +103,11 @@ class SpeakerSystem {
         const lr = c.count < 5 ? 0.3 : 0.05;
         for(let i=0; i<8; i++) c.centroid[i] = c.centroid[i]*(1-lr) + vector[i]*lr;
         c.count++;
-        if(meta.gender && meta.gender !== '?' && c.gender === '?') c.gender = meta.gender; 
+        // 🛠️ FIX: GENDER OVERRIDE
+        // Eğer yeni segment net bir cinsiyet veriyorsa ve eski etiket '?' veya zıtsa güncelle
+        if(meta.gender && meta.gender !== '?') {
+            c.gender = meta.gender; 
+        }
     }
     rename(id) {
         const c = this.clusters[id]; if(!c) return;
@@ -138,17 +124,14 @@ const Speaker = new SpeakerSystem();
 const AudioSys = {
     ctx: null, analyser: null, script: null, 
     chunks: [], isRec: false, timer: null, startT: 0, handsFree: false, lastSpk: 0, isSpk: false,
-    wakeLock: null,
-    vadThreshold: 0.02,
-    vadPauseTime: 1500,
+    wakeLock: null, vadThreshold: 0.02, vadPauseTime: 1500,
 
     async init() {
         if(this.ctx) return;
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const src = this.ctx.createMediaStreamSource(stream);
-        this.analyser = this.ctx.createAnalyser(); 
-        this.analyser.fftSize = 256; 
+        this.analyser = this.ctx.createAnalyser(); this.analyser.fftSize = 256; 
         this.script = this.ctx.createScriptProcessor(4096, 1, 1);
         src.connect(this.analyser); this.analyser.connect(this.script); this.script.connect(this.ctx.destination);
         this.script.onaudioprocess = e => this.process(e);
@@ -162,23 +145,11 @@ const AudioSys = {
         const inData = e.inputBuffer.getChannelData(0);
         let s = 0; for(let i=0; i<inData.length; i++) s += inData[i]*inData[i];
         const rms = Math.sqrt(s/inData.length);
-        
         if(this.isRec) this.chunks.push(this.floatTo16(inData));
-        
         if(this.handsFree) { 
-            const th = this.vadThreshold; 
-            const pt = this.vadPauseTime;
-            
-            if(rms > th) { 
-                this.lastSpk = Date.now(); 
-                if(!this.isSpk) { 
-                    this.isSpk = true; 
-                    if(!this.isRec) UI.toggleRec(); 
-                } 
-            } else if(this.isSpk && Date.now() - this.lastSpk > pt) { 
-                this.isSpk = false; 
-                if(this.isRec) UI.toggleRec(); 
-            }
+            const th = this.vadThreshold; const pt = this.vadPauseTime;
+            if(rms > th) { this.lastSpk = Date.now(); if(!this.isSpk) { this.isSpk = true; if(!this.isRec) UI.toggleRec(); } } 
+            else if(this.isSpk && Date.now() - this.lastSpk > pt) { this.isSpk = false; if(this.isRec) UI.toggleRec(); }
         }
     },
     floatTo16(input) {
@@ -210,7 +181,7 @@ const UI = {
         this.bind('#tempRange', '#tempDisplay', 'stt_temp', "0.0");
         this.bind('#lpfRange', '#lpfDisplay', 'stt_lpf', "0.05");
         this.bind('#pitchGateRange', '#pitchGateDisplay', 'stt_pitch_gate', "165");
-        this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', "0.85", (v) => Speaker.setThreshold(v));
+        this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', "0.94", (v) => Speaker.setThreshold(v)); // Default 0.94
         this.bind('#vadThRange', '#vadThDisplay', 'stt_vad_th', "0.02", (v) => AudioSys.vadThreshold = parseFloat(v));
         this.bind('#vadPauseRange', '#vadPauseDisplay', 'stt_vad_pause', "1500", (v) => AudioSys.vadPauseTime = parseInt(v));
 
@@ -242,23 +213,13 @@ const UI = {
     },
 
     bind(inpId, dispId, key, defValue, callback) {
-        const el = $(inpId);
-        const display = $(dispId);
-        if(!el) return;
-
-        const stored = localStorage.getItem(key);
-        const val = stored !== null ? stored : defValue;
-        
-        el.value = val;
-        if(display) display.innerText = val;
-        
+        const el = $(inpId); const display = $(dispId); if(!el) return;
+        const stored = localStorage.getItem(key); const val = stored !== null ? stored : defValue;
+        el.value = val; if(display) display.innerText = val;
         if (typeof callback === 'function') callback(val);
-
         el.oninput = e => { 
-            const v = e.target.value;
-            if(display) display.innerText = v; 
-            localStorage.setItem(key, v); 
-            if (typeof callback === 'function') callback(v);
+            const v = e.target.value; if(display) display.innerText = v; 
+            localStorage.setItem(key, v); if (typeof callback === 'function') callback(v);
         };
     },
 
@@ -268,15 +229,12 @@ const UI = {
     toggleRec() {
         if(!AudioSys.ctx) AudioSys.init();
         if(AudioSys.isRec) {
-            AudioSys.isRec = false; clearInterval(AudioSys.timer);
-            AudioSys.releaseWakeLock(); AudioSys.haptic([50, 50]);
+            AudioSys.isRec = false; clearInterval(AudioSys.timer); AudioSys.releaseWakeLock(); AudioSys.haptic([50, 50]);
             $('#recordBtn').classList.remove('recording'); $('#recordTimer').classList.remove('active');
-            const dur = Date.now() - AudioSys.startT;
-            if(dur > 500) this.sendAudio(AudioSys.getBlob(), dur);
+            const dur = Date.now() - AudioSys.startT; if(dur > 500) this.sendAudio(AudioSys.getBlob(), dur);
             AudioSys.chunks = []; $('#recordTimer').innerText = "00:00";
         } else {
-            AudioSys.chunks = []; AudioSys.isRec = true; AudioSys.startT = Date.now();
-            AudioSys.requestWakeLock(); AudioSys.haptic([50]);
+            AudioSys.chunks = []; AudioSys.isRec = true; AudioSys.startT = Date.now(); AudioSys.requestWakeLock(); AudioSys.haptic([50]);
             $('#recordBtn').classList.add('recording'); $('#recordTimer').classList.add('active');
             AudioSys.timer = setInterval(() => {
                 const d = Math.floor((Date.now() - AudioSys.startT)/1000);
@@ -286,90 +244,51 @@ const UI = {
     },
 
     toggleVad() {
-        AudioSys.handsFree = !AudioSys.handsFree;
-        const btn = $('#vadBtn');
+        AudioSys.handsFree = !AudioSys.handsFree; const btn = $('#vadBtn');
         if (AudioSys.handsFree) {
-            btn.classList.add('active');
-            btn.innerHTML = '<div class="active-dot"></div><i class="fas fa-wave-square"></i>';
-            AudioSys.haptic([50]);
-            if(!AudioSys.ctx) AudioSys.init();
+            btn.classList.add('active'); btn.innerHTML = '<div class="active-dot"></div><i class="fas fa-wave-square"></i>';
+            AudioSys.haptic([50]); if(!AudioSys.ctx) AudioSys.init();
         } else {
-            btn.classList.remove('active');
-            btn.innerHTML = '<div class="active-dot" style="display:none"></div><i class="fas fa-robot"></i>';
+            btn.classList.remove('active'); btn.innerHTML = '<div class="active-dot" style="display:none"></div><i class="fas fa-robot"></i>';
             AudioSys.haptic([20]);
         }
     },
 
     async sendAudio(blob, durMs) {
         const fd = new FormData();
-        fd.append('file', blob);
-        fd.append('language', $('#langSelect').value);
-        fd.append('prompt', $('#promptInput').value);
-        fd.append('temperature', $('#tempRange').value);
-        fd.append('prosody_lpf_alpha', $('#lpfRange').value);
-        fd.append('prosody_pitch_gate', $('#pitchGateRange').value);
-        
+        fd.append('file', blob); fd.append('language', $('#langSelect').value);
+        fd.append('prompt', $('#promptInput').value); fd.append('temperature', $('#tempRange').value);
+        fd.append('prosody_lpf_alpha', $('#lpfRange').value); fd.append('prosody_pitch_gate', $('#pitchGateRange').value);
         const tempId = this.showLoading();
-        
         try {
-            const t0 = Date.now();
-            const r = await fetch('/v1/transcribe', { method: 'POST', body: fd });
-            const d = await r.json();
-            this.removeLoading(tempId);
-            
+            const t0 = Date.now(); const r = await fetch('/v1/transcribe', { method: 'POST', body: fd });
+            const d = await r.json(); this.removeLoading(tempId);
             if(r.ok) {
                 const url = URL.createObjectURL(blob);
-                if (!d.segments || d.segments.length === 0) {
-                    this.showToast("⚠️ Ses algılandı ama metin çözülemedi.");
-                    return;
-                }
+                if (!d.segments || d.segments.length === 0) { this.showToast("⚠️ Ses algılandı ama metin çözülemedi."); return; }
                 const renderedCount = this.render(d, durMs, url);
-                if (renderedCount === 0) {
-                    this.showToast("🚫 Sonuç filtrelendi (Gürültü/Halüsinasyon).");
-                } else {
-                    this.updateMetrics(durMs, Date.now()-t0, d);
-                }
-            } else { 
-                this.showToast("❌ API Hatası: " + (d.error || "Bilinmiyor")); 
-            }
-        } catch(e) { 
-            this.removeLoading(tempId); 
-            console.error(e);
-            this.showToast("❌ Bağlantı Hatası");
-        }
+                if (renderedCount === 0) this.showToast("🚫 Sonuç filtrelendi."); else this.updateMetrics(durMs, Date.now()-t0, d);
+            } else { this.showToast("❌ API Hatası: " + (d.error || "Bilinmiyor")); }
+        } catch(e) { this.removeLoading(tempId); console.error(e); this.showToast("❌ Bağlantı Hatası"); }
     },
 
-    downloadAudio(url) {
-        if(!url) return;
-        const a = document.createElement('a'); a.href = url; a.download = `rec_${Date.now()}.wav`; a.click();
-    },
+    downloadAudio(url) { if(!url) return; const a = document.createElement('a'); a.href = url; a.download = `rec_${Date.now()}.wav`; a.click(); },
 
     showToast(msg) {
-        const t = document.createElement('div');
-        t.className = 'toast-msg';
-        t.innerText = msg;
-        t.style.cssText = `
-            position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
-            background: #333; color: #fff; padding: 10px 20px; border-radius: 20px;
-            font-size: 12px; opacity: 0; transition: 0.3s; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            border: 1px solid rgba(255,255,255,0.1);
-        `;
-        document.body.appendChild(t);
-        requestAnimationFrame(() => { t.style.opacity = '1'; t.style.bottom = '120px'; });
+        const t = document.createElement('div'); t.className = 'toast-msg'; t.innerText = msg;
+        t.style.cssText = `position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; padding: 10px 20px; border-radius: 20px; font-size: 12px; opacity: 0; transition: 0.3s; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);`;
+        document.body.appendChild(t); requestAnimationFrame(() => { t.style.opacity = '1'; t.style.bottom = '120px'; });
         setTimeout(() => { t.style.opacity = '0'; t.style.bottom = '100px'; setTimeout(() => t.remove(), 300); }, 3000);
     },    
 
     render(data, dur, url) {
-        const c = $('#transcriptFeed');
-        $('.empty-placeholder')?.remove();
-        
+        const c = $('#transcriptFeed'); $('.empty-placeholder')?.remove();
         const segs = data.segments && data.segments.length ? data.segments : (data.text ? [{text: data.text, start:0, speaker_vec:[], gender:'?', words:[]}] : []);
         let renderedCount = 0;
 
         segs.forEach((seg, idx) => {
             if (TextProcessor.isHallucination(seg.text)) return; 
             renderedCount++;
-
             const spk = Speaker.identify(seg.speaker_vec, {gender: seg.gender});
             const emo = { excited:"🔥", sad:"😢", angry:"😠" }[seg.emotion] || "";
             const gen = spk.gender === 'F' ? '👩' : (spk.gender === 'M' ? '👨' : '👤');
@@ -381,25 +300,12 @@ const UI = {
             if (seg.words && seg.words.length > 0) {
                 textHtml = seg.words.map(w => {
                     let cls = w.probability < 0.5 ? "low" : (w.probability < 0.75 ? "mid" : "high");
-                    // --- KARAOKE FİX: MİNİMUM SÜRE GARANTİSİ ---
-                    let s = parseFloat(w.start);
-                    let e = parseFloat(w.end);
-                    if (e - s < 0.2) e = s + 0.25; 
-                    
+                    let s = parseFloat(w.start); let e = parseFloat(w.end); if (e - s < 0.2) e = s + 0.25; 
                     return `<span class="w" data-start="${s}" data-end="${e}" data-conf="${cls}">${w.word}</span>`;
                 }).join(""); 
-            } else {
-                textHtml = seg.text;
-            }
+            } else { textHtml = seg.text; }
 
-            const playerHtml = url && idx===segs.length-1 ? `
-                <div class="mini-player">
-                    <button class="player-btn" onclick="UI.play(this,'${url}', ${seg.start})"><i class="fas fa-play"></i></button>
-                    <div class="wave-vis">${waves}</div>
-                    <div class="sep" style="height:12px; margin:0 4px"></div>
-                    <button class="player-btn" onclick="UI.downloadAudio('${url}')"><i class="fas fa-download"></i></button>
-                </div>` : '';
-
+            const playerHtml = url && idx===segs.length-1 ? `<div class="mini-player"><button class="player-btn" onclick="UI.play(this,'${url}', ${seg.start})"><i class="fas fa-play"></i></button><div class="wave-vis">${waves}</div><div class="sep" style="height:12px; margin:0 4px"></div><button class="player-btn" onclick="UI.downloadAudio('${url}')"><i class="fas fa-download"></i></button></div>` : '';
             const html = `
             <div class="speaker-row" id="seg-${Date.now()}-${idx}">
                 <div class="avatar-box" style="border-color:${spk.color}; color:${spk.color}" onclick="Speaker.rename('${spk.id}')">
@@ -418,73 +324,45 @@ const UI = {
             c.insertAdjacentHTML('beforeend', html);
         });
         
-        if (renderedCount > 0) {
-            requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
-        }
+        if (renderedCount > 0) requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
         return renderedCount;
     },
 
     play(el, url, offset) {
         const i = el.querySelector('i');
-        
         if(window.audio) {
-            window.audio.pause(); 
-            if(window.playBtn) window.playBtn.className='fas fa-play';
+            window.audio.pause(); if(window.playBtn) window.playBtn.className='fas fa-play';
             if(window.karaokeFrame) cancelAnimationFrame(window.karaokeFrame);
             $$('.w.active-word').forEach(e => e.classList.remove('active-word'));
             if(window.playBtn === i) { window.audio = null; return; }
         }
-
-        window.audio = new Audio(url); 
-        window.playBtn = i; 
-        i.className = 'fas fa-pause'; 
-        
+        window.audio = new Audio(url); window.playBtn = i; i.className = 'fas fa-pause'; 
         window.audio.onerror = () => { UI.showToast("Ses dosyası oynatılamadı."); i.className = 'fas fa-play'; };
-        
-        // Hata toleransı: play promise hatasını yakala
-        window.audio.play().catch(e => console.warn("Oynatma hatası:", e));
+        window.audio.play().catch(e => console.warn(e));
 
-        // --- GLOBAL SELECTOR FIX ---
-        // Sadece o anki satırı değil, tüm transcript içindeki kelimeleri al.
-        // Böylece ses bir sonraki konuşmacıya geçince oradaki kelimeler de yanar.
+        // 🛠️ FIX: GLOBAL KARAOKE SCOPE
+        // Tüm kelimeleri seç, sadece o satırı değil
         const allWords = Array.from(document.querySelectorAll('#transcriptFeed .w'));
 
         if (ViewModes.karaoke && allWords.length > 0) {
             const checkKaraoke = () => {
                 if(!window.audio || window.audio.paused) return;
-                
-                const localT = window.audio.currentTime; // Offset genellikle 0'dır çünkü blob kesilmiştir
-                
-                // Performans optimizasyonu: Sadece ekranda görünür olanları check etmeye gerek yok, 
-                // sayı az olduğu için hepsini dönebiliriz.
+                const localT = window.audio.currentTime;
                 allWords.forEach(w => {
-                    const s = parseFloat(w.getAttribute('data-start')); 
-                    const e = parseFloat(w.getAttribute('data-end'));
-                    
-                    if (localT >= s && localT <= e) {
-                        if (!w.classList.contains('active-word')) {
-                            w.classList.add('active-word');
-                            // İsteğe bağlı: Otomatik kaydırma (Aktif kelimeyi ortala)
-                            // w.scrollIntoView({behavior: "smooth", block: "nearest", inline: "center"});
-                        }
-                    } else {
-                        w.classList.remove('active-word');
-                    }
+                    const s = parseFloat(w.getAttribute('data-start')); const e = parseFloat(w.getAttribute('data-end'));
+                    if (localT >= s && localT <= e) { if (!w.classList.contains('active-word')) w.classList.add('active-word'); } 
+                    else { w.classList.remove('active-word'); }
                 });
-                
                 window.karaokeFrame = requestAnimationFrame(checkKaraoke);
             };
             window.karaokeFrame = requestAnimationFrame(checkKaraoke);
         }
 
         window.audio.onended = () => {
-            i.className = 'fas fa-play'; 
-            if(window.karaokeFrame) cancelAnimationFrame(window.karaokeFrame);
-            $$('.w.active-word').forEach(e => e.classList.remove('active-word')); 
-            window.audio = null;
+            i.className = 'fas fa-play'; if(window.karaokeFrame) cancelAnimationFrame(window.karaokeFrame);
+            $$('.w.active-word').forEach(e => e.classList.remove('active-word')); window.audio = null;
         };
     },
-    
     showLoading() {
         const id = 'tmp-'+Date.now();
         $('#transcriptFeed').insertAdjacentHTML('beforeend', `<div id="${id}" class="speaker-row" style="opacity:0.5"><div class="avatar-box"><i class="fas fa-circle-notch fa-spin"></i></div><div class="msg-content"><div class="bubble">İşleniyor...</div></div></div>`);
@@ -508,17 +386,12 @@ const UI = {
     startViz() {
         const cv = $('#audioVisualizer'); const ctx = cv.getContext('2d');
         const rsz = () => { cv.width = cv.parentElement.offsetWidth; cv.height = cv.parentElement.offsetHeight; };
-        window.onresize = rsz; rsz();
-        const arr = new Uint8Array(AudioSys.analyser.frequencyBinCount);
+        window.onresize = rsz; rsz(); const arr = new Uint8Array(AudioSys.analyser.frequencyBinCount);
         const loop = () => {
             requestAnimationFrame(loop); AudioSys.analyser.getByteFrequencyData(arr);
-            ctx.clearRect(0,0,cv.width,cv.height);
-            const barW = (cv.width/arr.length)*2.5; let x=0;
+            ctx.clearRect(0,0,cv.width,cv.height); const barW = (cv.width/arr.length)*2.5; let x=0;
             ctx.fillStyle = document.body.getAttribute('data-theme')=='dark'?'rgba(59,130,246,0.4)':'rgba(37,99,235,0.4)';
-            for(let i=0; i<arr.length; i++) {
-                const h = (arr[i]/255)*cv.height;
-                ctx.fillRect(cv.width/2+x, (cv.height-h)/2, barW, h); ctx.fillRect(cv.width/2-x, (cv.height-h)/2, barW, h); x+=barW+1;
-            }
+            for(let i=0; i<arr.length; i++) { const h = (arr[i]/255)*cv.height; ctx.fillRect(cv.width/2+x, (cv.height-h)/2, barW, h); ctx.fillRect(cv.width/2-x, (cv.height-h)/2, barW, h); x+=barW+1; }
         }; loop();
     },
     clear() { $('#transcriptFeed').innerHTML = '<div class="empty-placeholder"><div class="placeholder-icon"><i class="fas fa-microphone-lines"></i></div><h3>Temizlendi</h3></div>'; Speaker.reset(); }
