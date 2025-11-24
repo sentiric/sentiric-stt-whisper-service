@@ -2,6 +2,111 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
 // =============================================================================
+// 📈 SYSTEM MONITOR (NEW)
+// =============================================================================
+class SystemMonitor {
+    constructor() {
+        this.canvas = $('#monitorCanvas');
+        this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
+        this.history = new Array(50).fill(0);
+        this.lastTokens = 0;
+        this.lastCheck = Date.now();
+        
+        if (this.ctx) {
+            this.resize();
+            this.startPolling();
+        }
+    }
+
+    resize() {
+        if(!this.canvas) return;
+        this.canvas.width = this.canvas.parentElement.offsetWidth;
+        this.canvas.height = 80;
+    }
+
+    async startPolling() {
+        setInterval(async () => {
+            try {
+                // Port 15032 Metrics Server'a istek
+                const r = await fetch('http://localhost:15032/metrics');
+                const text = await r.text();
+                this.parseAndRender(text);
+            } catch (e) {
+                // console.warn("Metrics polling failed (backend offline?)", e);
+            }
+        }, 1000);
+    }
+
+    parseAndRender(text) {
+        // Simple Regex Parsing
+        const getVal = (key) => {
+            const m = text.match(new RegExp(`${key} ([0-9.]+)`));
+            return m ? parseFloat(m[1]) : 0;
+        };
+
+        const totalReq = getVal('stt_requests_total');
+        const totalAudio = getVal('stt_audio_seconds_processed_total');
+        const currentTokens = getVal('stt_tokens_generated_total');
+
+        // Update Stats UI
+        $('#totalReq').innerText = totalReq;
+        $('#totalAudio').innerText = (totalAudio / 3600).toFixed(2);
+
+        // TPS Calculation
+        const now = Date.now();
+        const dt = (now - this.lastCheck) / 1000;
+        let tps = 0;
+        
+        if (dt > 0 && this.lastTokens > 0) {
+            const dTokens = currentTokens - this.lastTokens;
+            tps = dTokens / dt;
+        }
+
+        this.lastTokens = currentTokens;
+        this.lastCheck = now;
+
+        // Smooth TPS for UI
+        $('#tpsVal').innerText = tps.toFixed(1);
+
+        // Push to History & Draw
+        this.history.push(tps);
+        this.history.shift();
+        this.draw();
+    }
+
+    draw() {
+        if(!this.ctx) return;
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        const ctx = this.ctx;
+        
+        ctx.clearRect(0, 0, w, h);
+        
+        // Draw Line
+        ctx.beginPath();
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 2;
+        
+        const maxVal = Math.max(10, ...this.history);
+        const step = w / (this.history.length - 1);
+
+        this.history.forEach((val, i) => {
+            const x = i * step;
+            const y = h - (val / maxVal * h * 0.8) - 5; // %80 yükseklik kullan, alt boşluk bırak
+            if(i===0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // Fill Area
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.1)';
+        ctx.fill();
+    }
+}
+const SysMon = new SystemMonitor();
+
+// =============================================================================
 // 🧠 PROMPT & CONFIG SYSTEM
 // =============================================================================
 const Templates = {
@@ -318,13 +423,6 @@ const UI = {
             window.karaokeInterval = setInterval(() => {
                 if(!window.audio) return;
                 const ct = window.audio.currentTime + offset; // Adjust for segment offset if needed (assuming file is full clip)
-                // Actually usually file is full, segment times are global. 
-                // But here we upload small clips usually. 
-                // Let's assume the clip corresponds to the segments rendered.
-                // If it's a full recording, seg.start matters. But usually we process chunk by chunk.
-                // NOTE: For live stream/chunk, file starts at 0. So words.start might need offsetting relative to file.
-                // However, backend returns global timestamp relative to beginning of stream? 
-                // For simplicity in this demo, let's assume words.start is relative to the clip playing.
                 
                 // Correction: Whisper API returns relative to start of processing usually.
                 // Let's use simple matching.
@@ -365,9 +463,11 @@ const UI = {
         // Avg Confidence
         let total = 0, count = 0;
         data.segments?.forEach(s => s.words?.forEach(w => { total += w.probability; count++; }));
-        const avg = count ? (total/count*100).toFixed(0) : 0;
-        $('#confVal').innerText = avg + '%';
-        $('#langVal').innerText = (data.language || '?').toUpperCase();
+        // const avg = count ? (total/count*100).toFixed(0) : 0;
+        // $('#confVal').innerText = avg + '%';
+        // $('#langVal').innerText = (data.language || '?').toUpperCase();
+        
+        $('#tokenVal').innerText = data.meta?.tokens || 0;
         
         $('#jsonOutput').innerText = JSON.stringify(data, null, 2);
     },

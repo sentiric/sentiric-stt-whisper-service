@@ -11,11 +11,26 @@ using namespace sentiric::utils;
 
 MetricsServer::MetricsServer(const std::string& host, int port, prometheus::Registry& registry)
     : host_(host), port_(port), registry_(registry) {
+    
+    // YENİ: CORS Headerları eklendi. Omni-Studio (15030) buradan (15032) veri çekebilsin.
     svr_.Get("/metrics", [this](const httplib::Request &, httplib::Response &res) {
         prometheus::TextSerializer serializer;
         auto collected_metrics = this->registry_.Collect();
         std::stringstream ss; serializer.Serialize(ss, collected_metrics);
+        
+        res.set_header("Access-Control-Allow-Origin", "*"); // KRİTİK: Tarayıcı erişimi için
+        res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type");
+        
         res.set_content(ss.str(), "text/plain; version=0.0.4");
+    });
+
+    // Options isteği için de (Preflight)
+    svr_.Options("/metrics", [](const httplib::Request &, httplib::Response &res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type");
+        res.status = 204;
     });
 }
 void MetricsServer::run() { spdlog::info("📊 Metrics server listening on {}:{}", host_, port_); svr_.listen(host_.c_str(), port_); }
@@ -63,11 +78,21 @@ void HttpServer::setup_routes() {
             auto start_time = std::chrono::steady_clock::now();
             DecodedAudio audio = parse_wav_robust(file.content);
             if (audio.pcm_data.empty()) throw std::runtime_error("Parsed WAV data is empty.");
+            
+            // --- Abort Callback Lambda ---
+            // HTTP sunucusu blocking olduğu için şu anlık abort callback vermiyoruz.
+            // İleride async yapıya geçilirse buraya eklenebilir.
+            
             auto results = engine_->transcribe_pcm16(audio.pcm_data, audio.sample_rate, opts);
             auto end_time = std::chrono::steady_clock::now(); std::chrono::duration<double> processing_time = end_time - start_time;
+            
             std::string full_text; std::string detected_lang = "unknown"; json segments = json::array();
+            int total_tokens = 0; // Metrik için
+
             for (const auto& r : results) {
                 std::string safe_text = clean_utf8(r.text); full_text += safe_text; detected_lang = r.language;
+                total_tokens += r.token_count;
+                
                 json words_json = json::array();
                 for (const auto& t : r.tokens) words_json.push_back({ {"word", clean_utf8(t.text)}, {"start", (double)t.t0 / 100.0}, {"end", (double)t.t1 / 100.0}, {"probability", t.p} });
                 const auto& aff = r.affective;
@@ -84,10 +109,15 @@ void HttpServer::setup_routes() {
                 });
             }
             double duration = static_cast<double>(audio.pcm_data.size()) / static_cast<double>(audio.sample_rate);
-            metrics_.audio_seconds_processed_total.Increment(duration); metrics_.request_latency.Observe(processing_time.count());
+            
+            // Metrik Güncellemeleri
+            metrics_.audio_seconds_processed_total.Increment(duration); 
+            metrics_.request_latency.Observe(processing_time.count());
+            metrics_.tokens_generated_total.Increment(total_tokens);
+
             json response = {
                 {"text", full_text}, {"language", detected_lang}, {"duration", duration}, {"segments", segments},
-                {"meta", { {"processing_time", processing_time.count()}, {"rtf", processing_time.count() / (duration > 0 ? duration : 1.0)}, {"input_sr", audio.sample_rate}, {"input_channels", audio.channels} } }
+                {"meta", { {"processing_time", processing_time.count()}, {"rtf", processing_time.count() / (duration > 0 ? duration : 1.0)}, {"input_sr", audio.sample_rate}, {"input_channels", audio.channels}, {"tokens", total_tokens} } }
             };
             res.set_content(response.dump(), "application/json");
         } catch (const std::exception& e) {
