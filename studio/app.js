@@ -2,7 +2,7 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
 // =============================================================================
-// 🧠 SPEAKER SYSTEM & PERSISTENCE
+// 🧠 SPEAKER SYSTEM (Clustering)
 // =============================================================================
 class SpeakerSystem {
     constructor() {
@@ -48,7 +48,6 @@ class SpeakerSystem {
     }
     reset() { this.clusters = {}; this.nextId = 0; }
 }
-
 const Speaker = new SpeakerSystem();
 
 // =============================================================================
@@ -57,7 +56,6 @@ const Speaker = new SpeakerSystem();
 const AudioSys = {
     ctx: null, analyser: null, script: null, 
     chunks: [], isRec: false, timer: null, startT: 0, handsFree: false, lastSpk: 0, isSpk: false,
-    lastBlob: null, // Son kaydedilen dosya
 
     async init() {
         if(this.ctx) return;
@@ -77,8 +75,8 @@ const AudioSys = {
         let s = 0; for(let i=0; i<inData.length; i++) s += inData[i]*inData[i];
         const rms = Math.sqrt(s/inData.length);
         if(this.isRec) this.chunks.push(this.floatTo16(inData));
-        if(this.handsFree) { // Basit VAD (Client Side Trigger)
-            const th = 0.02; // Sabit client eşiği, detaylar serverda
+        if(this.handsFree) { 
+            const th = 0.02; 
             if(rms > th) { this.lastSpk = Date.now(); if(!this.isSpk) { this.isSpk = true; if(!this.isRec) UI.toggleRec(); } } 
             else if(this.isSpk && Date.now() - this.lastSpk > 1500) { this.isSpk = false; if(this.isRec) UI.toggleRec(); }
         }
@@ -86,10 +84,7 @@ const AudioSys = {
 
     floatTo16(input) {
         const out = new Int16Array(input.length);
-        for(let i=0; i<input.length; i++) {
-            let s = Math.max(-1, Math.min(1, input[i]));
-            out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        }
+        for(let i=0; i<input.length; i++) { let s = Math.max(-1, Math.min(1, input[i])); out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; }
         return out;
     },
 
@@ -100,9 +95,7 @@ const AudioSys = {
         const w = (O,S)=> { for(let i=0;i<S.length;i++)v.setUint8(O+i,S.charCodeAt(i)); };
         w(0,'RIFF'); v.setUint32(4,36+res.length*2,true); w(8,'WAVEfmt '); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
         v.setUint32(24,r,true); v.setUint32(28,r*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,res.length*2,true);
-        new Int16Array(b,44).set(res); 
-        this.lastBlob = new Blob([b],{type:'audio/wav'}); // Sakla
-        return this.lastBlob;
+        new Int16Array(b,44).set(res); return new Blob([b],{type:'audio/wav'});
     }
 };
 
@@ -111,18 +104,11 @@ const AudioSys = {
 // =============================================================================
 const UI = {
     init() {
-        // --- Sidebar Overlay Logic ---
-        const tog = (side, s) => { 
-            $(`#sidebar${side}`).classList.toggle('active', s); 
-            $(`#overlay${side}`).classList.toggle('active', s); 
-        };
-        $('#mobLeftBtn').onclick = () => tog('Left', true);
-        $('#mobRightBtn').onclick = () => tog('Right', true);
-        $('#closeLeft').onclick = () => tog('Left', false);
-        $('#closeRight').onclick = () => tog('Right', false);
+        const tog = (side, s) => { $(`#sidebar${side}`).classList.toggle('active', s); $(`#overlay${side}`).classList.toggle('active', s); };
+        $('#mobLeftBtn').onclick = () => tog('Left', true); $('#mobRightBtn').onclick = () => tog('Right', true);
+        $('#closeLeft').onclick = () => tog('Left', false); $('#closeRight').onclick = () => tog('Right', false);
         $$('.sidebar-overlay').forEach(o => o.onclick = () => { tog('Left', false); tog('Right', false); });
 
-        // --- Bindings with Persistence ---
         this.bind('#tempRange', '#tempDisplay', 'stt_temp');
         this.bind('#lpfRange', '#lpfDisplay', 'stt_lpf');
         this.bind('#pitchGateRange', '#pitchGateDisplay', 'stt_pitch_gate');
@@ -130,48 +116,37 @@ const UI = {
 
         $('#recordBtn').onclick = () => this.toggleRec();
         $('#vadBtn').onclick = () => this.toggleVad();
-        $('#fileInput').onchange = e => { if(e.target.files[0]) this.sendFile(e.target.files[0]); };
+        $('#fileInput').onchange = e => { if(e.target.files[0]) this.sendAudio(e.target.files[0], 0); };
         
-        // --- Theme ---
         const t = localStorage.getItem('theme') || 'dark';
         document.body.setAttribute('data-theme', t);
         $$('.theme-toggle').forEach(b => b.onclick = () => {
             const n = document.body.getAttribute('data-theme')=='dark'?'light':'dark';
             document.body.setAttribute('data-theme', n); localStorage.setItem('theme', n);
         });
-
         document.onkeydown = e => { if(e.code=='Space' && e.target.tagName!='TEXTAREA' && e.target.tagName!='INPUT') { e.preventDefault(); this.toggleRec(); } };
     },
 
     bind(inpId, dispId, key, cb) {
-        const el = $(inpId);
-        const stored = localStorage.getItem(key);
+        const el = $(inpId); const stored = localStorage.getItem(key);
         if(stored) { el.value = stored; $(dispId).innerText = stored; if(cb) cb(stored); }
-        el.oninput = e => {
-            $(dispId).innerText = e.target.value;
-            localStorage.setItem(key, e.target.value);
-            if(cb) cb(e.target.value);
-        };
+        el.oninput = e => { $(dispId).innerText = e.target.value; localStorage.setItem(key, e.target.value); if(cb) cb(e.target.value); };
     },
 
     toggleAcc(id) { $(`#${id}`).classList.toggle('active'); },
-
-    resetSettings() {
-        localStorage.clear(); location.reload();
-    },
+    resetSettings() { localStorage.clear(); location.reload(); },
 
     toggleRec() {
         if(!AudioSys.ctx) AudioSys.init();
         if(AudioSys.isRec) {
             AudioSys.isRec = false; clearInterval(AudioSys.timer);
-            $('#recordBtn').classList.remove('recording');
+            $('#recordBtn').classList.remove('recording'); $('#recordTimer').classList.remove('active');
             const dur = Date.now() - AudioSys.startT;
             if(dur > 500) this.sendAudio(AudioSys.getBlob(), dur);
-            AudioSys.chunks = []; $('#recordTimer').innerText = "00:00"; $('#recordTimer').style.opacity = '0';
+            AudioSys.chunks = []; $('#recordTimer').innerText = "00:00";
         } else {
             AudioSys.chunks = []; AudioSys.isRec = true; AudioSys.startT = Date.now();
-            $('#recordBtn').classList.add('recording'); $('#recordTimer').style.opacity = '1';
-            $('#downloadAudioBtn').disabled = true; // Yeni kayıt başlarken indir butonunu kapat
+            $('#recordBtn').classList.add('recording'); $('#recordTimer').classList.add('active');
             AudioSys.timer = setInterval(() => {
                 const d = Math.floor((Date.now() - AudioSys.startT)/1000);
                 $('#recordTimer').innerText = `${String(Math.floor(d/60)).padStart(2,'0')}:${String(d%60).padStart(2,'0')}`;
@@ -187,16 +162,11 @@ const UI = {
     },
 
     async sendAudio(blob, durMs) {
-        // Blob hazır, indirme butonunu aç
-        $('#downloadAudioBtn').disabled = false;
-        
         const fd = new FormData();
         fd.append('file', blob);
-        // PARAMETRELER (Local Storage'dan veya inputlardan)
         fd.append('language', $('#langSelect').value);
         fd.append('prompt', $('#promptInput').value);
         fd.append('temperature', $('#tempRange').value);
-        // YENİ: DSP Parametreleri
         fd.append('prosody_lpf_alpha', $('#lpfRange').value);
         fd.append('prosody_pitch_gate', $('#pitchGateRange').value);
         
@@ -213,16 +183,11 @@ const UI = {
             } else { alert("API Hatası: " + (d.error || "Bilinmiyor")); }
         } catch(e) { this.removeLoading(tempId); console.error(e); }
     },
-    
-    sendFile(file) { this.sendAudio(file, 0); }, // Dosya yükleme için wrapper
 
-    downloadAudio() {
-        if(!AudioSys.lastBlob) return;
-        const url = URL.createObjectURL(AudioSys.lastBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `recording_${new Date().toISOString().slice(0,19).replace(/:/g,"-")}.wav`;
-        a.click();
+    downloadAudio(url) {
+        if(!url) return;
+        const a = document.createElement('a'); a.href = url;
+        a.download = `sentiric_rec_${Date.now()}.wav`; a.click();
     },
 
     render(data, dur, url) {
@@ -235,9 +200,17 @@ const UI = {
             const emo = { excited:"🔥", sad:"😢", angry:"😠" }[seg.emotion] || "";
             const gen = spk.gender === 'F' ? '👩' : (spk.gender === 'M' ? '👨' : '👤');
             const vec = seg.speaker_vec || [0,0,0,0,0,0,0,0];
-            const pPct = Math.min(100, (vec[0]||0)*100);
-            const ePct = Math.min(100, (vec[2]||0)*100);
+            const pPct = Math.min(100, (vec[0]||0)*100); const ePct = Math.min(100, (vec[2]||0)*100);
             let waves = ''; for(let i=0; i<12; i++) waves += `<div class="wave-line" style="height:${Math.random()*8+4}px"></div>`;
+
+            // YENİ: İndirme Butonu Mini Player İçinde
+            const playerHtml = url && idx===segs.length-1 ? `
+                <div class="mini-player">
+                    <button class="player-btn" onclick="UI.play(this,'${url}')"><i class="fas fa-play"></i></button>
+                    <div class="wave-vis">${waves}</div>
+                    <div class="sep" style="height:12px; margin:0 4px"></div>
+                    <button class="player-btn" onclick="UI.downloadAudio('${url}')" title="Kayıdı İndir"><i class="fas fa-download"></i></button>
+                </div>` : '';
 
             const html = `
             <div class="speaker-row">
@@ -248,7 +221,7 @@ const UI = {
                     <div class="msg-meta"><span class="spk-label spk-lbl-${spk.id}" style="color:${spk.color}">${spk.name}</span><span class="time-label">${seg.start.toFixed(1)}s</span></div>
                     <div class="bubble ${isBad?'hallucination':''}" style="border-left-color:${spk.color}">${seg.text}</div>
                     <div class="features-row">
-                        ${url && idx===segs.length-1 ? `<div class="mini-player" onclick="UI.play(this,'${url}')"><div class="play-icon"><i class="fas fa-play"></i></div><div class="wave-vis">${waves}</div></div>` : ''}
+                        ${playerHtml}
                         <div class="prosody-item" title="Pitch"><i class="fas fa-music"></i><div class="bar-track"><div class="bar-fill" style="width:${pPct}%; background:${spk.color}"></div></div></div>
                         <div class="prosody-item" title="Energy"><i class="fas fa-bolt"></i><div class="bar-track"><div class="bar-fill" style="width:${ePct}%; background:${spk.color}"></div></div></div>
                     </div>
@@ -256,7 +229,9 @@ const UI = {
             </div>`;
             c.insertAdjacentHTML('beforeend', html);
         });
-        c.scrollTop = c.scrollHeight;
+        
+        // AUTO SCROLL FIX
+        requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
     },
 
     play(el, url) {
@@ -272,12 +247,14 @@ const UI = {
     showLoading() {
         const id = 'tmp-'+Date.now();
         $('#transcriptFeed').insertAdjacentHTML('beforeend', `<div id="${id}" class="speaker-row" style="opacity:0.5"><div class="avatar-box"><i class="fas fa-circle-notch fa-spin"></i></div><div class="msg-content"><div class="bubble">İşleniyor...</div></div></div>`);
+        $('#transcriptFeed').scrollTop = $('#transcriptFeed').scrollHeight;
         return id;
     },
     removeLoading(id) { document.getElementById(id)?.remove(); },
 
     updateMetrics(dur, proc, data) {
         $('#rtfVal').innerText = data.meta?.rtf ? (1/data.meta.rtf).toFixed(1) + 'x' : '0.0x';
+        $('#durVal').innerText = (dur/1000).toFixed(2)+'s'; $('#procVal').innerText = (proc/1000).toFixed(2)+'s';
         $('#jsonOutput').innerText = JSON.stringify(data, null, 2);
     },
 
@@ -312,7 +289,6 @@ const UI = {
             }
         }; loop();
     },
-    
     clear() { $('#transcriptFeed').innerHTML = '<div class="empty-placeholder"><div class="placeholder-icon"><i class="fas fa-microphone-lines"></i></div><h3>Temizlendi</h3></div>'; Speaker.reset(); }
 };
 

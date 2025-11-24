@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#09090b">
-    <title>Sentiric Omni-Studio v6</title>
+    <title>Sentiric Omni-Studio v7</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <style>
-        /* YENİ: Accordion Stilleri */
+        /* Accordion & Overlay Fixes */
         .accordion-header {
             width: 100%; text-align: left; background: var(--bg-input); border: 1px solid var(--border);
             padding: 10px 12px; font-size: 11px; font-weight: 700; color: var(--text-muted);
@@ -21,12 +21,8 @@
         .accordion-content.active { display: block; }
         @keyframes slideDown { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
         
-        /* Mobil Drawer Düzeltmeleri */
         .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 45; opacity: 0; pointer-events: none; transition: 0.3s; backdrop-filter: blur(4px); }
         .sidebar-overlay.active { opacity: 1; pointer-events: auto; }
-        
-        .download-btn-group { display: flex; gap: 8px; margin-top: 8px; }
-        .download-btn-group button { flex: 1; }
     </style>
 </head>
 <body data-theme="dark">
@@ -48,7 +44,7 @@
         <div class="sidebar-header">
             <div class="brand">
                 <div class="logo"><i class="fas fa-wave-square"></i></div>
-                <div class="brand-text"><h1>SENTIRIC</h1><span>WORKSTATION v6.0</span></div>
+                <div class="brand-text"><h1>SENTIRIC</h1><span>WORKSTATION v7.0</span></div>
             </div>
             <button class="close-sidebar mobile-only" id="closeLeft"><i class="fas fa-times"></i></button>
         </div>
@@ -66,26 +62,15 @@
                 <div class="switch-row"><div class="switch-label"><span>Speaker Diarization</span><small>Kişi ayrıştırma</small></div><label class="toggle"><input type="checkbox" id="diarizationToggle" checked><span class="slider"></span></label></div>
             </div>
 
-            <!-- GELİŞMİŞ DSP AYARLARI -->
             <div class="panel-section">
                 <button class="accordion-header" onclick="UI.toggleAcc('dspAcc')">
-                    <span>⚡ SES MOTORU AYARLARI (DSP)</span><i class="fas fa-chevron-down"></i>
+                    <span>⚡ SES MOTORU (DSP)</span><i class="fas fa-chevron-down"></i>
                 </button>
                 <div id="dspAcc" class="accordion-content">
-                    <div class="range-group">
-                        <div class="range-header"><span>Filtre Gücü (LPF Alpha)</span><span id="lpfDisplay">0.07</span></div>
-                        <input type="range" id="lpfRange" min="0.01" max="0.50" step="0.01" value="0.07">
-                        <small style="color:var(--text-muted); font-size:9px;">Düşük = Agresif Gürültü Engel</small>
-                    </div>
-                    <div class="range-group">
-                        <div class="range-header"><span>Cinsiyet Eşiği (Hz)</span><span id="pitchGateDisplay">170</span></div>
-                        <input type="range" id="pitchGateRange" min="100" max="250" step="5" value="170">
-                    </div>
-                    <div class="range-group">
-                        <div class="range-header"><span>Kümeleme Hassasiyeti</span><span id="clusterDisplay">0.85</span></div>
-                        <input type="range" id="clusterRange" min="0.70" max="0.99" step="0.01" value="0.85">
-                    </div>
-                    <button class="action-btn danger" style="width:100%" onclick="UI.resetSettings()">Varsayılanlara Dön</button>
+                    <div class="range-group"><div class="range-header"><span>Filtre Gücü</span><span id="lpfDisplay">0.07</span></div><input type="range" id="lpfRange" min="0.01" max="0.50" step="0.01" value="0.07"></div>
+                    <div class="range-group"><div class="range-header"><span>Cinsiyet Eşiği (Hz)</span><span id="pitchGateDisplay">170</span></div><input type="range" id="pitchGateRange" min="100" max="250" step="5" value="170"></div>
+                    <div class="range-group"><div class="range-header"><span>Kümeleme Hassasiyeti</span><span id="clusterDisplay">0.85</span></div><input type="range" id="clusterRange" min="0.70" max="0.99" step="0.01" value="0.85"></div>
+                    <button class="action-btn danger" style="width:100%" onclick="UI.resetSettings()">Sıfırla</button>
                 </div>
             </div>
             
@@ -109,8 +94,8 @@
         <div id="transcriptFeed" class="transcript-container">
             <div class="empty-placeholder">
                 <div class="placeholder-icon"><i class="fas fa-microphone-lines"></i></div>
-                <h3>Sistem Hazır (v6)</h3>
-                <p>DSP parametrelerini soldaki menüden ince ayarlayabilirsiniz.</p>
+                <h3>Sistem Hazır</h3>
+                <p>Sentiric AI dinliyor.</p>
             </div>
         </div>
 
@@ -122,8 +107,9 @@
                     <button class="dock-btn secondary" onclick="document.getElementById('fileInput').click()"><i class="fas fa-folder-open"></i></button>
                 </div>
                 <div class="dock-center">
-                    <button id="recordBtn" class="record-fab"><i class="fas fa-microphone"></i></button>
+                    <!-- Timer Yukarı Alındı -->
                     <div id="recordTimer" class="timer-pill">00:00</div>
+                    <button id="recordBtn" class="record-fab"><i class="fas fa-microphone"></i></button>
                 </div>
                 <div class="dock-right">
                     <button class="dock-btn secondary" id="vadBtn"><div class="active-dot"></div><i class="fas fa-robot"></i></button>
@@ -136,17 +122,21 @@
         <div class="sidebar-header"><h3>Analiz & Çıktı</h3><button class="close-sidebar mobile-only" id="closeRight"><i class="fas fa-times"></i></button></div>
         <div class="sidebar-scroll">
             <div class="metric-hero"><div class="m-label">RTF</div><div class="m-value-lg" id="rtfVal">0.0x</div></div>
+            <div class="metrics-grid">
+                <div class="metric-box"><div class="m-label">SÜRE</div><div class="m-val" id="durVal">0s</div></div>
+                <div class="metric-box"><div class="m-label">İŞLEM</div><div class="m-val" id="procVal">0ms</div></div>
+                <div class="metric-box"><div class="m-label">GÜVEN</div><div class="m-val" id="confVal">-</div></div>
+                <div class="metric-box"><div class="m-label">DİL</div><div class="m-val" id="langVal">-</div></div>
+            </div>
             <div class="json-panel">
-                <div class="panel-header"><span>DIŞA AKTAR</span></div>
-                <div class="download-btn-group">
-                    <button class="action-btn" onclick="UI.export('json')">JSON</button>
-                    <button class="action-btn" onclick="UI.export('txt')">TXT</button>
+                <div class="panel-header">
+                    <span>VERİ ÇIKTISI</span>
+                    <div style="display:flex; gap:4px">
+                        <button class="action-btn" style="padding:2px 8px" onclick="UI.export('json')">JSON</button>
+                        <button class="action-btn" style="padding:2px 8px" onclick="UI.export('txt')">TXT</button>
+                    </div>
                 </div>
-                <!-- YENİ: Ses İndirme Butonu -->
-                <button class="action-btn" id="downloadAudioBtn" onclick="UI.downloadAudio()" style="width:100%; margin-top:8px; border-color:var(--primary); color:var(--primary)" disabled>
-                    <i class="fas fa-file-audio"></i> Ses Kaydını İndir (WAV)
-                </button>
-                <pre id="jsonOutput" style="margin-top:16px;">...</pre>
+                <pre id="jsonOutput">Bekleniyor...</pre>
             </div>
         </div>
     </aside>
