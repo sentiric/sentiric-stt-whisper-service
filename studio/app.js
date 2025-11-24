@@ -75,11 +75,13 @@ const SysMon = new SystemMonitor();
 // 🧠 TEMPLATES
 // =============================================================================
 const Templates = {
-    general: "Doğru noktalama işaretleri kullan. Akıcı bir dil kullan.",
-    medical: "Hasta öyküsü, anamnez, teşhis, tedavi. Tıbbi terimler.",
-    legal: "Hukuki terminoloji. Davacı, davalı, hüküm.",
-    tech: "API, JSON, Docker, Kubernetes, refactoring, commit."
+  // prompt kullanımı yeniden daha doğru değerlendirmeliyiz.
+  general: "",
+  medical: "tıbbi terminoloji: anamnez, tanı, tedavi, farmakoloji terimleri",
+  legal: "hukuki terimler: davacı, davalı, hüküm, sözleşme",
+  tech: "teknik terimler: API, JSON, Docker, Kubernetes, commit"
 };
+
 const ViewModes = { heatmap: false, karaoke: true };
 
 // =============================================================================
