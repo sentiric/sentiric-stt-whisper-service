@@ -52,7 +52,14 @@ input:checked + .slider:before { transform: translateX(16px); }
 input[type=range] { width: 100%; height: 4px; background: var(--border); border-radius: 2px; accent-color: var(--primary); cursor: pointer; }
 
 /* Stage */
-.stage { display: flex; flex-direction: column; background: var(--bg-body); position: relative; height: 100%; }
+.stage { 
+    display: flex; 
+    flex-direction: column; 
+    background: var(--bg-body); 
+    position: relative; 
+    height: 100dvh; /* Ekranın tamamını kapla */
+    overflow: hidden; /* Dışarı taşmayı engelle */
+}
 .stage-header { height: 60px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); background: var(--bg-body); z-index: 10; }
 .header-title { font-weight: 600; display: flex; align-items: center; gap: 8px; color: var(--text-main); }
 .header-actions { display: flex; gap: 8px; align-items: center; }
@@ -63,15 +70,42 @@ input[type=range] { width: 100%; height: 4px; background: var(--border); border-
 
 /* Transcript */
 .transcript-container { 
-    flex: 1; 
-    padding: 24px; 
+    /* Flex Yapısı */
+    display: flex; 
+    flex-direction: column; /* Mesajları alt alta diz (Kritik Düzeltme) */
+    
+    /* Boyutlandırma */
+    flex: 1; /* Boş alanı doldur */
+    width: 100%; 
+    min-height: 0; /* Flexbox scroll bug fix (Kritik Düzeltme) */
+    
+    /* Kaydırma */
     overflow-y: auto; 
-    padding-bottom: 140px; /* Dock için alt boşluk */
+    overflow-x: hidden;
     scroll-behavior: smooth; 
-    min-height: 0; /* Flexbox scroll bug fix */
-    width: 100%;
+    
+    /* Boşluklar */
+    padding: 24px; 
+    padding-bottom: 160px; /* Dock'un altında kalmaması için boşluk */
 }
-.speaker-row { display: flex; gap: 16px; margin-bottom: 24px; max-width: 900px; margin-left: auto; margin-right: auto; animation: slideUp 0.3s ease; }
+.speaker-row { 
+    display: flex; 
+    gap: 16px; 
+    margin-bottom: 24px; 
+    width: 100%; /* Genişliği garantiye al */
+    max-width: 900px; 
+    margin-left: auto; 
+    margin-right: auto; 
+    flex-shrink: 0; /* Büzüşmeyi engelle */
+    animation: slideUp 0.3s ease; 
+}
+
+/* --- SCROLLBAR GÖRÜNÜMÜ (Webkit) --- */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
 @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .avatar-box { width: 42px; height: 42px; border-radius: 12px; background: var(--bg-card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; position: relative; cursor: pointer; transition: transform 0.2s; box-shadow: var(--shadow-card); }
 .avatar-box:hover { transform: scale(1.05); }
