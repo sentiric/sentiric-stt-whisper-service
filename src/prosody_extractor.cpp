@@ -74,14 +74,14 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     out.zero_crossing_rate = zcrs.empty() ? 0.1f : vector_mean(zcrs);
 
     // -------------------------------------------------------------------------
-    // 🛠️ HEURISTIC V4 (TUNED): ZCR EŞİĞİ ARTTIRILDI
+    // 🛠️ HEURISTIC V5 (FINAL TUNING): ZCR EŞİĞİ 0.024
     // -------------------------------------------------------------------------
-    // Can'ın ZCR değeri 0.025 geldiği için 0.022 eşiğini aşıyordu.
-    // Ezgi (Kadın) 0.039 civarında.
-    // Güvenli yeni eşik: 0.030f
+    // Ezgi (F) -> ~0.026 - 0.039
+    // Can (M)  -> ~0.016 - 0.022
+    // Optimum Eşik: 0.024f
     
     bool is_high_pitch = (out.pitch_mean > opts.gender_threshold);
-    bool is_low_zcr = (out.zero_crossing_rate < 0.030f); // <--- GÜNCELLENDİ
+    bool is_low_zcr = (out.zero_crossing_rate < 0.024f); // <--- KRİTİK GÜNCELLEME
 
     // Oktav Hatası Düzeltme
     if (is_high_pitch && is_low_zcr) {
@@ -89,6 +89,14 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     } else if (out.energy_mean > 0.12f && out.pitch_mean < 240.0f && out.spectral_centroid < 90.0f) {
          out.pitch_mean *= 0.5f;
     }
+
+    if (out.pitch_mean == 0.0f) {
+        out.gender_proxy = "?";
+    } else {
+        // ZCR 0.024 altındaysa Erkek olarak işaretle
+        if (out.zero_crossing_rate < 0.024f) out.gender_proxy = "M";
+        else out.gender_proxy = (out.pitch_mean > opts.gender_threshold) ? "F" : "M";
+    }    
 
     // --- CİNSİYET TESPİTİ ---
     float duration_sec = (float)n_samples / sample_rate;
