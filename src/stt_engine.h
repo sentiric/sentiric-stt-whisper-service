@@ -9,6 +9,7 @@
 #include <memory>
 #include <queue>
 #include <condition_variable>
+#include <functional>
 
 struct TokenData {
     std::string text;
@@ -28,6 +29,9 @@ struct RequestOptions {
     
     // YENİ: Advanced DSP Options
     ProsodyOptions prosody_opts;
+
+    // YENİ: Cancellation Callback (Thread-Safe)
+    std::function<bool()> should_abort = nullptr;
 };
 
 struct TranscriptionResult {
@@ -38,6 +42,7 @@ struct TranscriptionResult {
     int64_t t1;
     bool speaker_turn_next;
     std::vector<TokenData> tokens;
+    int token_count = 0; // YENİ
     std::string gender_proxy;
     std::string emotion_proxy;
     float arousal = 0.0f;

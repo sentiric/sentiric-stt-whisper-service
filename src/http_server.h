@@ -15,6 +15,7 @@ struct AppMetrics {
     prometheus::Counter& requests_total;
     prometheus::Histogram& request_latency;
     prometheus::Counter& audio_seconds_processed_total;
+    prometheus::Counter& tokens_generated_total; // YENİ: Token Throughput
 };
 
 class MetricsServer {

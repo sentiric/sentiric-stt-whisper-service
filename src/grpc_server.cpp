@@ -4,6 +4,7 @@
 #include <chrono>
 #include <vector>
 #include <cstring>
+#include <functional>
 
 using namespace sentiric::utils;
 
@@ -15,24 +16,39 @@ grpc::Status GrpcServer::WhisperTranscribe(
     const sentiric::stt::v1::WhisperTranscribeRequest* request,
     sentiric::stt::v1::WhisperTranscribeResponse* response)
 {
-    (void)context;
     metrics_.requests_total.Increment();
     auto start_time = std::chrono::steady_clock::now();
     if (!engine_->is_ready()) return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Model not ready");
     const std::string& audio_blob = request->audio_data();
     if (audio_blob.empty()) return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Audio data is empty");
+    
     DecodedAudio audio;
     try { audio = parse_wav_robust(audio_blob); } catch (const std::exception& e) {
         spdlog::error("gRPC Audio Parse Error: {}", e.what());
         return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, std::string("Invalid audio format: ") + e.what());
     }
     if (audio.pcm_data.empty()) return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Audio contains no data");
-    RequestOptions options; if (request->has_language()) options.language = request->language();
+    
+    RequestOptions options; 
+    if (request->has_language()) options.language = request->language();
+    // gRPC Context üzerinden Abort kontrolü
+    options.should_abort = [context]() { return context->IsCancelled(); };
+
     auto results = engine_->transcribe_pcm16(audio.pcm_data, audio.sample_rate, options);
+    
+    // Check if empty results due to abort
+    if (context->IsCancelled()) return grpc::Status::CANCELLED;
+
     std::string full_text; float avg_prob = 0.0f; std::string main_lang = "unknown";
+    int total_tokens = 0;
+
     if (!results.empty()) {
         main_lang = results[0].language;
-        for (const auto& res : results) { full_text += res.text; avg_prob += res.prob; }
+        for (const auto& res : results) { 
+            full_text += res.text; 
+            avg_prob += res.prob; 
+            total_tokens += res.token_count;
+        }
         avg_prob /= results.size();
     }
     response->set_transcription(full_text);
@@ -47,21 +63,24 @@ grpc::Status GrpcServer::WhisperTranscribe(
         response->set_emotion_proxy(aff.emotion_proxy);
         response->set_arousal(aff.arousal);
         response->set_valence(aff.valence);
-        // yeniler: proto'ya ekledik
         response->set_pitch_mean(aff.pitch_mean);
         response->set_pitch_std(aff.pitch_std);
         response->set_energy_mean(aff.energy_mean);
         response->set_energy_std(aff.energy_std);
         response->set_spectral_centroid(aff.spectral_centroid);
         response->set_zero_crossing_rate(aff.zero_crossing_rate);
-        // speaker_vec
         for (float v : aff.speaker_vec) response->add_speaker_vec(v);
     }
+    
     metrics_.audio_seconds_processed_total.Increment(duration_sec);
+    metrics_.tokens_generated_total.Increment(total_tokens); // METRIC
+
     auto end_time = std::chrono::steady_clock::now();
     std::chrono::duration<double> latency = end_time - start_time;
     metrics_.request_latency.Observe(latency.count());
-    spdlog::info("gRPC Unary: {:.2f}s Audio (SR:{}), Latency: {:.2f}s", duration_sec, audio.sample_rate, latency.count());
+    
+    double tps = (latency.count() > 0) ? total_tokens / latency.count() : 0.0;
+    spdlog::info("gRPC Unary: {:.2f}s Audio -> {} Tokens ({:.1f} TPS), Latency: {:.2f}s", duration_sec, total_tokens, tps, latency.count());
     return grpc::Status::OK;
 }
 
@@ -75,7 +94,10 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     sentiric::stt::v1::WhisperTranscribeStreamRequest request;
     std::vector<int16_t> full_pcm_buffer;
     bool is_first_chunk = true; bool is_wav_container = false; size_t wav_header_skip = 0;
+    
     while (stream->Read(&request)) {
+        if (context->IsCancelled()) return grpc::Status::CANCELLED; // Erken çıkış
+
         const std::string& chunk = request.audio_chunk();
         if (chunk.empty()) continue;
         if (is_first_chunk) {
@@ -97,14 +119,23 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
             std::memcpy(full_pcm_buffer.data() + current_size, data_ptr, samples * 2);
         }
     }
+    
     if (context->IsCancelled()) { spdlog::warn("Stream cancelled by client"); return grpc::Status::CANCELLED; }
+    
     RequestOptions options;
+    options.should_abort = [context]() { return context->IsCancelled(); };
+    
     auto results = engine_->transcribe_pcm16(full_pcm_buffer, 16000, options);
+    
+    if (context->IsCancelled()) return grpc::Status::CANCELLED;
+
+    int total_tokens = 0;
     for (size_t i = 0; i < results.size(); ++i) {
         sentiric::stt::v1::WhisperTranscribeStreamResponse response;
         response.set_transcription(results[i].text);
         response.set_is_final(i == results.size() - 1);
         const auto& aff = results[i].affective;
+        // ... (Field mapping same as before) ...
         response.set_gender_proxy(aff.gender_proxy);
         response.set_emotion_proxy(aff.emotion_proxy);
         response.set_arousal(aff.arousal);
@@ -116,12 +147,19 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
         response.set_spectral_centroid(aff.spectral_centroid);
         response.set_zero_crossing_rate(aff.zero_crossing_rate);
         for (float v : aff.speaker_vec) response.add_speaker_vec(v);
-        stream->Write(response);
+        
+        // Gönderim başarısız olursa (Client koptuysa) durdur
+        if (!stream->Write(response)) break;
+        total_tokens += results[i].token_count;
     }
+    
     double duration_sec = static_cast<double>(full_pcm_buffer.size()) / 16000.0;
     metrics_.audio_seconds_processed_total.Increment(duration_sec);
+    metrics_.tokens_generated_total.Increment(total_tokens);
+    
     auto end_time = std::chrono::steady_clock::now(); std::chrono::duration<double> latency = end_time - start_time;
     metrics_.request_latency.Observe(latency.count());
-    spdlog::info("gRPC Stream Finished. Processed {:.2f}s", duration_sec);
+    
+    spdlog::info("gRPC Stream Finished. Processed {:.2f}s, Tokens: {}", duration_sec, total_tokens);
     return grpc::Status::OK;
 }

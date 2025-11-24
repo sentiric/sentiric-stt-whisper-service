@@ -57,33 +57,31 @@ int main() {
     spdlog::info("🚀 Sentiric STT Whisper Service (C++) Starting...");
     spdlog::info("Config: Model={}, Threads={}", settings.model_filename, settings.n_threads);
 
-    // --- AUTO-PROVISIONING ---
     try {
         spdlog::info("📦 Checking models...");
-        // 1. Ana Model
         ModelManager::ensure_model(settings);
-        // 2. VAD Modeli (YENİ)
         if (settings.enable_vad) {
             ModelManager::ensure_vad_model(settings);
         }
     } catch (const std::exception& e) {
         spdlog::critical("Model provisioning failed: {}", e.what());
-        return 1; // Modeller yoksa başlama
+        return 1;
     }
-    // -------------------------
 
     auto registry = std::make_shared<prometheus::Registry>();
     auto& req_total = prometheus::BuildCounter().Name("stt_requests_total").Register(*registry).Add({});
     
-    prometheus::Histogram::BucketBoundaries buckets{0.1, 0.5, 1.0, 5.0, 10.0};
+    prometheus::Histogram::BucketBoundaries buckets{0.1, 0.5, 1.0, 5.0, 10.0, 30.0};
     auto& req_latency = prometheus::BuildHistogram()
                             .Name("stt_request_latency_seconds")
                             .Register(*registry)
                             .Add({}, buckets);
 
     auto& audio_sec = prometheus::BuildCounter().Name("stt_audio_seconds_processed_total").Register(*registry).Add({});
+    // YENİ METRİK
+    auto& tokens_gen = prometheus::BuildCounter().Name("stt_tokens_generated_total").Register(*registry).Add({});
     
-    AppMetrics metrics = {req_total, req_latency, audio_sec};
+    AppMetrics metrics = {req_total, req_latency, audio_sec, tokens_gen};
 
     try {
         auto engine = std::make_shared<SttEngine>(settings);

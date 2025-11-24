@@ -9,10 +9,14 @@
 #include <numeric>
 #include <cstring>
 
-// ... (Constructor/Destructor/Helpers aynı, transcribe fonksiyonu değişiyor) ...
-// NOT: Kısaltma yasak olduğu için sadece değişen fonksiyonu değil, dosya yapısını koruyarak tüm gerekli içeriği vermeliyim.
-// Ancak SttEngine constructor ve diğer metodlar değişmedi, sadece transcribe içinde extract_prosody çağrısı değişti.
-// Yer tasarrufu ve bağlam için sadece transcribe fonksiyonunu güncellemiyorum, DOSYAYI BAŞTAN YAZIYORUM.
+// C-style callback wrapper for whisper.cpp
+static bool whisper_abort_callback_wrapper(void* user_data) {
+    if (user_data) {
+        auto* func = static_cast<std::function<bool()>*>(user_data);
+        return (*func)();
+    }
+    return false;
+}
 
 SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
@@ -108,6 +112,13 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     const RequestOptions& options)
 {
     if (!ctx_) return {};
+    
+    // --- EARLY CANCELLATION CHECK ---
+    if (options.should_abort && options.should_abort()) {
+        spdlog::warn("Transcription aborted before start.");
+        return {};
+    }
+
     const float* pcm_ptr = pcmf32.data();
     size_t pcm_size = pcmf32.size();
     std::vector<float> resampled_buffer;
@@ -116,14 +127,13 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         if (!resampled_buffer.empty()) { pcm_ptr = resampled_buffer.data(); pcm_size = resampled_buffer.size(); }
     }
     
-    // Varsayılan boş prosody
     ProsodyOptions p_opts = options.prosody_opts; 
 
     if (settings_.enable_vad && pcm_size > (16000 * 0.2)) {
         if (!is_speech_detected(pcm_ptr, pcm_size)) {
             TranscriptionResult empty_res; empty_res.text = ""; empty_res.language = "unknown"; empty_res.prob = 0.0f;
             empty_res.t0 = 0; empty_res.t1 = static_cast<int64_t>(pcm_size / 16.0); empty_res.speaker_turn_next = false;
-            // Güncellenmiş çağrı
+            empty_res.token_count = 0; // ZERO TOKENS
             empty_res.affective = extract_prosody(nullptr, 0, 16000, p_opts); 
             empty_res.speaker_id = "unknown";
             return {empty_res};
@@ -138,6 +148,18 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     int active_best_of = (options.best_of >= 0) ? options.best_of : settings_.best_of;
     whisper_sampling_strategy strategy = (active_beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
     whisper_full_params wparams = whisper_full_default_params(strategy);
+    
+    // --- ABORT CALLBACK SETUP ---
+    // NOT: options.should_abort const referans olduğu için cast sorunu yaşamamak adına
+    // const_cast veya mutable pointer kopyası kullanıyoruz.
+    // Ancak std::function move-only değil, kopyalanabilir.
+    std::function<bool()> abort_fn = options.should_abort; 
+    if (abort_fn) {
+        wparams.abort_callback = whisper_abort_callback_wrapper;
+        wparams.abort_callback_user_data = &abort_fn;
+    }
+    // ----------------------------
+
     wparams.print_realtime = false; wparams.print_progress = false; wparams.print_timestamps = !settings_.no_timestamps;
     wparams.print_special = false; wparams.token_timestamps = true; wparams.suppress_nst = settings_.suppress_nst;
     wparams.no_speech_thold = settings_.no_speech_threshold;
@@ -164,6 +186,7 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             std::vector<TokenData> tokens;
             int n_tokens = whisper_full_n_tokens_from_state(state, i);
             double total_prob = 0.0; int valid_token_count = 0;
+            
             for (int j = 0; j < n_tokens; ++j) {
                 auto data = whisper_full_get_token_data_from_state(state, i, j);
                 const char* token_text = whisper_token_to_str(ctx_, data.id);
@@ -184,10 +207,8 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             std::string spk_id = "?";
 
             if (seg_samples < 160) { 
-                spdlog::warn("Segment too short for prosody ({} samples)", seg_samples);
                 pros = extract_prosody(nullptr, 0, 16000, p_opts);
             } else {
-                // PARAMETRE GEÇİŞİ: p_opts
                 pros = extract_prosody(pcm_ptr + sample_start, seg_samples, 16000, p_opts);
                 if (!pros.speaker_vec.empty()) {
                     spk_id = clusterer.assign_or_add(pros.speaker_vec);
@@ -195,9 +216,16 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             }
 
             results.push_back({ std::string(text), target_lang, avg_prob, t0, t1, speaker_turn_next, tokens,
+                                valid_token_count, // Token Count
                                 pros.gender_proxy, pros.emotion_proxy, pros.arousal, pros.valence, pros, spk_id });
         }
-    } else { spdlog::error("Whisper processing failed with error code: {}", ret); }
+    } else { 
+        if (options.should_abort && options.should_abort()) {
+            spdlog::warn("Whisper processing aborted by user request.");
+        } else {
+            spdlog::error("Whisper processing failed with error code: {}", ret); 
+        }
+    }
     release_state(state);
     return results;
 }
