@@ -21,10 +21,11 @@ static float soft_norm(float val, float min_v, float max_v) {
     return std::max(0.0f, std::min(1.0f, norm));
 }
 
-AffectiveTags extract_prosody(const std::vector<float>& pcm, int sample_rate) {
+AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sample_rate) {
     AffectiveTags out;
     
-    if (pcm.size() < 160) { 
+    // Yetersiz veri kontrolü
+    if (n_samples < 160 || pcm_data == nullptr) { 
         out.gender_proxy = "?"; out.emotion_proxy = "neutral";
         out.pitch_mean = 0; out.pitch_std = 0;
         out.energy_mean = 0; out.energy_std = 0;
@@ -36,13 +37,23 @@ AffectiveTags extract_prosody(const std::vector<float>& pcm, int sample_rate) {
 
     const int frame_shift = sample_rate / 100; // 10 ms
     std::vector<float> f0s, rmses, zcrs, scs;
+    // Önceden kapasite ayırma (Performans)
+    size_t expected_frames = n_samples / frame_shift;
+    f0s.reserve(expected_frames);
+    rmses.reserve(expected_frames);
+    zcrs.reserve(expected_frames);
+    scs.reserve(expected_frames);
+
     int peak_count = 0; // Hece/Vurgu sayacı için
     float last_rms = 0;
 
-    for (size_t i = 0; i + 2 * frame_shift < pcm.size(); i += frame_shift) {
+    for (size_t i = 0; i + frame_shift <= n_samples; i += frame_shift) {
         // --- RMS & Peaks ---
         float r0 = 0;
-        for (int k = 0; k < frame_shift; ++k) r0 += pcm[i+k] * pcm[i+k];
+        for (int k = 0; k < frame_shift; ++k) {
+            float val = pcm_data[i+k];
+            r0 += val * val;
+        }
         float rms = std::sqrt(r0 / frame_shift);
         rmses.push_back(rms);
 
@@ -53,7 +64,7 @@ AffectiveTags extract_prosody(const std::vector<float>& pcm, int sample_rate) {
         // --- Zero Crossing & Pitch Proxy ---
         int zcr = 0;
         for (int k = 1; k < frame_shift; ++k)
-            if ((pcm[i + k] >= 0) != (pcm[i + k - 1] >= 0)) ++zcr;
+            if ((pcm_data[i + k] >= 0) != (pcm_data[i + k - 1] >= 0)) ++zcr;
         float zcr_val = static_cast<float>(zcr) / frame_shift;
         zcrs.push_back(zcr_val);
 
@@ -66,7 +77,7 @@ AffectiveTags extract_prosody(const std::vector<float>& pcm, int sample_rate) {
         // --- Spectral Centroid Proxy ---
         float power = 0, weighted = 0;
         for (int k = 1; k < frame_shift; ++k) {
-            float diff = std::abs(pcm[i + k] - pcm[i + k - 1]);
+            float diff = std::abs(pcm_data[i + k] - pcm_data[i + k - 1]);
             weighted += diff * k; power += diff;
         }
         float sc = (power > 0) ? weighted / power : 0;
@@ -82,7 +93,7 @@ AffectiveTags extract_prosody(const std::vector<float>& pcm, int sample_rate) {
     out.zero_crossing_rate = zcrs.empty() ? 0.1f : vector_mean(zcrs);
 
     // --- Speech Rate Calculation ---
-    float duration_sec = (float)pcm.size() / sample_rate;
+    float duration_sec = (float)n_samples / sample_rate;
     float speech_rate = (duration_sec > 0) ? (float)peak_count / duration_sec : 0.0f; 
     // Normal konuşma: 3-5 hece/sn. Hızlı: >6.
 

@@ -1,5 +1,6 @@
 #include "stt_engine.h"
 #include "prosody_extractor.h"
+#include "speaker_cluster.h" // <-- YENI
 #include "spdlog/spdlog.h"
 #include <samplerate.h>
 #include <stdexcept>
@@ -109,15 +110,27 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         resampled_buffer = resample_audio(pcmf32.data(), pcmf32.size(), input_sample_rate, 16000);
         if (!resampled_buffer.empty()) { pcm_ptr = resampled_buffer.data(); pcm_size = resampled_buffer.size(); }
     }
+    // Uyarı: Çok uzun dosyalarda VAD kontrolü burada hatalı sonuç verebilir.
+    // Ancak mevcut mimariyi koruyoruz, sadece pointer check.
     if (settings_.enable_vad && pcm_size > (16000 * 0.2)) {
         if (!is_speech_detected(pcm_ptr, pcm_size)) {
             TranscriptionResult empty_res; empty_res.text = ""; empty_res.language = "unknown"; empty_res.prob = 0.0f;
             empty_res.t0 = 0; empty_res.t1 = static_cast<int64_t>(pcm_size / 16.0); empty_res.speaker_turn_next = false;
-            empty_res.affective = extract_prosody({}, 16000); // defaults
+            // Sıfır maliyetli varsayılan değerler, allocation yok
+            empty_res.affective = extract_prosody(nullptr, 0, 16000); 
+            empty_res.speaker_id = "unknown";
             return {empty_res};
         }
     }
+
     struct whisper_state* state = acquire_state();
+    
+    // --- Server-Side Clustering Initialization (Per Request) ---
+    // Her istek için yeni bir kümeleyici başlatıyoruz. 
+    // Böylece dosya içindeki konuşmacılar tutarlı (spk_0, spk_1) etiketlenir.
+    SpeakerClusterer clusterer(0.85f); 
+    // -----------------------------------------------------------
+
     int active_beam_size = (options.beam_size >= 0) ? options.beam_size : settings_.beam_size;
     float active_temp = (options.temperature >= 0.0f) ? options.temperature : settings_.temperature;
     int active_best_of = (options.best_of >= 0) ? options.best_of : settings_.best_of;
@@ -134,8 +147,10 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     if (strategy == WHISPER_SAMPLING_BEAM_SEARCH) wparams.beam_search.beam_size = active_beam_size;
     else wparams.greedy.best_of = active_best_of;
     wparams.entropy_thold = 2.40f; wparams.logprob_thold = settings_.logprob_threshold; wparams.n_threads = settings_.n_threads;
+    
     int ret = whisper_full_with_state(ctx_, state, wparams, pcm_ptr, static_cast<int>(pcm_size));
     std::vector<TranscriptionResult> results;
+    
     if (ret == 0) {
         const int n_segments = whisper_full_n_segments_from_state(state);
         const float MIN_AVG_TOKEN_PROB = 0.40f;
@@ -157,25 +172,30 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             float avg_prob = (valid_token_count > 0) ? static_cast<float>(total_prob / valid_token_count) : 0.0f;
             if (avg_prob < MIN_AVG_TOKEN_PROB && valid_token_count > 0) continue;
 
-            // ---- SAMPLE -> PROSODY (robust) ----
+            // ---- SAMPLE -> PROSODY (robust & optimized) ----
             int64_t sample_start = static_cast<int64_t>((static_cast<double>(t0) / 100.0) * 16000.0);
             int64_t sample_end   = static_cast<int64_t>((static_cast<double>(t1) / 100.0) * 16000.0);
             sample_start = std::max<int64_t>(0, std::min(sample_start, static_cast<int64_t>(pcm_size)));
             sample_end   = std::max<int64_t>(sample_start, std::min(sample_end, static_cast<int64_t>(pcm_size)));
             size_t seg_samples = sample_end - sample_start;
-            if (seg_samples < 160) { // 10 ms altı → defaults
+            
+            // Allocation'sız çağrı (Pointer arithmetic)
+            AffectiveTags pros;
+            std::string spk_id = "?";
+
+            if (seg_samples < 160) { 
                 spdlog::warn("Segment too short for prosody ({} samples), using defaults", seg_samples);
-                auto pros = extract_prosody({}, 16000);
-                results.push_back({ std::string(text), target_lang, avg_prob, t0, t1, speaker_turn_next, tokens,
-                                    pros.gender_proxy, pros.emotion_proxy, pros.arousal, pros.valence, pros });
-                continue;
+                pros = extract_prosody(nullptr, 0, 16000);
+            } else {
+                pros = extract_prosody(pcm_ptr + sample_start, seg_samples, 16000);
+                // Kümeleme (Clustering) - Vector varsa ID üret
+                if (!pros.speaker_vec.empty()) {
+                    spk_id = clusterer.assign_or_add(pros.speaker_vec);
+                }
             }
-            auto pros = extract_prosody(
-                std::vector<float>(pcm_ptr + sample_start, pcm_ptr + sample_end),
-                16000);
 
             results.push_back({ std::string(text), target_lang, avg_prob, t0, t1, speaker_turn_next, tokens,
-                                pros.gender_proxy, pros.emotion_proxy, pros.arousal, pros.valence, pros });
+                                pros.gender_proxy, pros.emotion_proxy, pros.arousal, pros.valence, pros, spk_id });
         }
     } else { spdlog::error("Whisper processing failed with error code: {}", ret); }
     release_state(state);

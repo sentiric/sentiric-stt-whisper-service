@@ -1,7 +1,8 @@
 #pragma once
 #include "config.h"
 #include "whisper.h"
-#include "prosody_extractor.h"   // <-- yeni
+#include "prosody_extractor.h"
+#include "speaker_cluster.h" // <-- YENI: Dahil edildi
 #include <vector>
 #include <string>
 #include <mutex>
@@ -40,6 +41,8 @@ struct TranscriptionResult {
     float arousal = 0.0f;
     float valence = 0.0f;
     AffectiveTags affective; // tüm feature'lar
+    // ---- speaker identity ----
+    std::string speaker_id; // <-- YENI: Server-side clustering ID
 };
 
 class SttEngine {

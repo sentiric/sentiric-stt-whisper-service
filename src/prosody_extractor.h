@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <string>
+#include <cstddef> // size_t için
 
 struct AffectiveTags {
     std::string gender_proxy;   // "M" / "F"
@@ -16,4 +17,5 @@ struct AffectiveTags {
     std::vector<float> speaker_vec; // 8-D
 };
 
-AffectiveTags extract_prosody(const std::vector<float>& pcm, int sample_rate);
+// Optimization: Pass pointer + size instead of copying vector
+AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sample_rate);

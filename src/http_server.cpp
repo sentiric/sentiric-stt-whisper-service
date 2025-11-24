@@ -61,7 +61,10 @@ void HttpServer::setup_routes() {
                 const auto& aff = r.affective;
                 segments.push_back({
                     {"text", safe_text}, {"start", (double)r.t0 / 100.0}, {"end", (double)r.t1 / 100.0}, {"probability", r.prob},
-                    {"speaker_turn_next", r.speaker_turn_next}, {"gender", aff.gender_proxy}, {"emotion", aff.emotion_proxy},
+                    {"speaker_turn_next", r.speaker_turn_next}, 
+                    // YENİ: Speaker ID
+                    {"speaker_id", r.speaker_id},
+                    {"gender", aff.gender_proxy}, {"emotion", aff.emotion_proxy},
                     {"arousal", aff.arousal}, {"valence", aff.valence},
                     {"pitch_mean", aff.pitch_mean}, {"pitch_std", aff.pitch_std},
                     {"energy_mean", aff.energy_mean}, {"energy_std", aff.energy_std},
