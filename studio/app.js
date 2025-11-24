@@ -24,8 +24,13 @@ class SpeakerSystem {
     }
 
     identify(vector, meta) {
-        // Vektör validasyonu
+        // Vektör validasyonu: Eğer vektör boşsa (default) veya hepsi sıfırsa
+        // yeni bir cluster oluşturma, "Bilinmeyen" olarak dön veya en yakına zorlama.
         if(!vector || vector.length !== 8) vector = new Array(8).fill(0);
+
+        // Eğer sistem pitch bulamadıysa (vektörün ilk elemanı default/sıfırsa)
+        // Cinsiyet '?' ise, bunu cluster'a kirletici olarak eklememek daha iyidir.
+        // Ancak şimdilik en iyi eşleşmeye bakıyoruz.
 
         let bestId = null, bestScore = -1;
         
@@ -255,7 +260,8 @@ const UI = {
             
             // Emoji Map
             const emo = { excited:"🔥", sad:"😢", angry:"😠" }[seg.emotion] || "";
-            const gen = spk.gender === 'F' ? '👩' : '👨';
+            // DÜZELTME: Eğer gender '?' ise nötr ikon kullan
+            const gen = spk.gender === 'F' ? '👩' : (spk.gender === 'M' ? '👨' : '👤');
 
             // Bars calculation (from vec)
             const vec = seg.speaker_vec || [0,0,0,0,0,0,0,0];
@@ -321,15 +327,30 @@ const UI = {
 
     copyJson() { navigator.clipboard.writeText($('#jsonOutput').innerText); },
     clear() { $('#transcriptFeed').innerHTML = '<div class="empty-placeholder"><div class="placeholder-icon"><i class="fas fa-microphone-lines"></i></div><h3>Temizlendi</h3></div>'; Speaker.reset(); },
+    
+    // DÜZELTME: Valid JSON Export
     export(t) {
-        let txt=""; $$('.speaker-row').forEach(r=>{ 
-            if(r.id.startsWith('tmp'))return;
-            const n=r.querySelector('.spk-label').innerText; 
-            const m=r.querySelector('.bubble').innerText.replace(/\n/g,' ');
-            txt += t=='json' ? JSON.stringify({speaker:n,text:m})+"," : `[${n}]: ${m}\n`; 
+        const data = [];
+        let txt = "";
+        
+        $$('.speaker-row').forEach(r => { 
+            if(r.id.startsWith('tmp')) return;
+            const n = r.querySelector('.spk-label').innerText; 
+            const m = r.querySelector('.bubble').innerText.replace(/\n/g,' ');
+            
+            if (t === 'json') {
+                data.push({ speaker: n, text: m });
+            } else {
+                txt += `[${n}]: ${m}\n`;
+            }
         });
-        const blob=new Blob([txt],{type:'text/plain'});
-        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='transcript.'+t; a.click();
+
+        const blobContent = t === 'json' ? JSON.stringify(data, null, 2) : txt;
+        const blob = new Blob([blobContent], {type: t === 'json' ? 'application/json' : 'text/plain'});
+        const a = document.createElement('a'); 
+        a.href = URL.createObjectURL(blob); 
+        a.download = 'transcript.' + t; 
+        a.click();
     },
 
     startViz() {
@@ -352,6 +373,5 @@ const UI = {
     }
 };
 
-// DÜZELTME: Global Erişime Aç
 window.UI = UI;
 UI.init();

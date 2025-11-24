@@ -67,9 +67,10 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
         zcrs.push_back(zcr_val);
 
         // Pitch Proxy (ZCR based)
-        if (zcr_val > 0.01f && zcr_val < 0.4f) {
+        // DÜZELTME: RMS Threshold düşürüldü (0.005) çünkü 150Hz default sorunu
+        // sessiz veya düşük enerjili segmentlerde pitch'in hiç bulunamamasından kaynaklanıyor.
+        if (rms > 0.005f && zcr_val > 0.01f && zcr_val < 0.4f) {
             float estimated_f0 = zcr_val * sample_rate * 0.5f; 
-            // Yetişkin insan sesi filtresi
             if(estimated_f0 > 60 && estimated_f0 < 450) f0s.push_back(estimated_f0);
         }
 
@@ -83,29 +84,32 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
         scs.push_back(sc);
     }
 
-    out.pitch_mean = f0s.empty() ? 150.0f : vector_mean(f0s);
-    out.pitch_std  = f0s.empty() ? 20.0f  : vector_stdev(f0s, out.pitch_mean);
+    // İstatistikler
+    // DÜZELTME: Varsayılan değer (fallback) "0" olarak ayarlandı.
+    // 150.0f vermek "Default Male" olarak algılanmasına neden oluyor.
+    // Eğer pitch bulunamazsa 0 dönmeli, gender "?" olmalı.
+    out.pitch_mean = f0s.empty() ? 0.0f : vector_mean(f0s);
+    out.pitch_std  = f0s.empty() ? 0.0f : vector_stdev(f0s, out.pitch_mean);
     out.energy_mean = rmses.empty() ? 0.01f : vector_mean(rmses);
     out.energy_std  = rmses.empty() ? 0.00f : vector_stdev(rmses, out.energy_mean);
     out.spectral_centroid = scs.empty() ? 50.0f : vector_mean(scs);
     out.zero_crossing_rate = zcrs.empty() ? 0.1f : vector_mean(zcrs);
 
-    // DÜZELTME: Oktav Hatası Giderici (Harmonic Correction Heuristic)
-    // ZCR tabanlı pitch, harmonik zengin seslerde (erkek sesi) sıklıkla 2. harmoniği (2x pitch) yakalar.
-    // Eğer pitch çok yüksekse (örn > 240Hz) ve standart sapma da yüksekse, bu muhtemelen bir oktav hatasıdır.
     if (out.pitch_mean > 240.0f) {
-         // Yetişkinlerde 240Hz üstü konuşma nadirdir (çocuk hariç). 
-         // Bunu güvenli tarafta kalmak için 0.5 ile çarpıyoruz (Oktav düşürme).
          out.pitch_mean *= 0.5f; 
     }
 
     float duration_sec = (float)n_samples / sample_rate;
     float speech_rate = (duration_sec > 0) ? (float)peak_count / duration_sec : 0.0f; 
 
-    // Classification Rules (Updated Threshold)
-    out.gender_proxy = (out.pitch_mean > 175.0f) ? "F" : "M";
+    // Classification Rules
+    // DÜZELTME: Pitch 0 ise (bulunamadıysa) '?' ata, Erkek deme.
+    if (out.pitch_mean == 0.0f) {
+        out.gender_proxy = "?";
+    } else {
+        out.gender_proxy = (out.pitch_mean > 175.0f) ? "F" : "M";
+    }
 
-    // Arousal & Valence...
     float norm_energy = soft_norm(out.energy_mean, 0.01f, 0.25f);
     float norm_rate = soft_norm(speech_rate, 2.0f, 8.0f);
     out.arousal = (norm_energy * 0.6f) + (norm_rate * 0.4f);
