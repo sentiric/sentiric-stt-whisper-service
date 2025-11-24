@@ -440,25 +440,38 @@ const UI = {
         i.className = 'fas fa-pause'; 
         
         window.audio.onerror = () => { UI.showToast("Ses dosyası oynatılamadı."); i.className = 'fas fa-play'; };
-        window.audio.play(); 
+        
+        // Hata toleransı: play promise hatasını yakala
+        window.audio.play().catch(e => console.warn("Oynatma hatası:", e));
 
-        const row = el.closest('.speaker-row'); 
-        const words = row ? Array.from(row.querySelectorAll('.w')) : [];
+        // --- GLOBAL SELECTOR FIX ---
+        // Sadece o anki satırı değil, tüm transcript içindeki kelimeleri al.
+        // Böylece ses bir sonraki konuşmacıya geçince oradaki kelimeler de yanar.
+        const allWords = Array.from(document.querySelectorAll('#transcriptFeed .w'));
 
-        // --- KARAOKE FİX: RequestAnimationFrame ---
-        if (ViewModes.karaoke && words.length > 0) {
+        if (ViewModes.karaoke && allWords.length > 0) {
             const checkKaraoke = () => {
                 if(!window.audio || window.audio.paused) return;
-                const localT = window.audio.currentTime;
-                words.forEach(w => {
+                
+                const localT = window.audio.currentTime; // Offset genellikle 0'dır çünkü blob kesilmiştir
+                
+                // Performans optimizasyonu: Sadece ekranda görünür olanları check etmeye gerek yok, 
+                // sayı az olduğu için hepsini dönebiliriz.
+                allWords.forEach(w => {
                     const s = parseFloat(w.getAttribute('data-start')); 
                     const e = parseFloat(w.getAttribute('data-end'));
+                    
                     if (localT >= s && localT <= e) {
-                        if (!w.classList.contains('active-word')) w.classList.add('active-word');
+                        if (!w.classList.contains('active-word')) {
+                            w.classList.add('active-word');
+                            // İsteğe bağlı: Otomatik kaydırma (Aktif kelimeyi ortala)
+                            // w.scrollIntoView({behavior: "smooth", block: "nearest", inline: "center"});
+                        }
                     } else {
                         w.classList.remove('active-word');
                     }
                 });
+                
                 window.karaokeFrame = requestAnimationFrame(checkKaraoke);
             };
             window.karaokeFrame = requestAnimationFrame(checkKaraoke);
@@ -471,6 +484,7 @@ const UI = {
             window.audio = null;
         };
     },
+    
     showLoading() {
         const id = 'tmp-'+Date.now();
         $('#transcriptFeed').insertAdjacentHTML('beforeend', `<div id="${id}" class="speaker-row" style="opacity:0.5"><div class="avatar-box"><i class="fas fa-circle-notch fa-spin"></i></div><div class="msg-content"><div class="bubble">İşleniyor...</div></div></div>`);
