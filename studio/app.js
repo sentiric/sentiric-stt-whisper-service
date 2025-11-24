@@ -178,10 +178,19 @@ const UI = {
         $('#closeLeft').onclick = () => tog('Left', false); $('#closeRight').onclick = () => tog('Right', false);
         $$('.sidebar-overlay').forEach(o => o.onclick = () => { tog('Left', false); tog('Right', false); });
 
+        // --- FABRİKA AYARLARI GÜNCELLEMESİ ---
+        // Pitch Gate: 170Hz (Kadın/Erkek sınırı). ZCR bunu override edeceği için güvenli.
+        // Cluster: 0.94 (Ezgi ve Can'ı ayıran değer).
+        
         this.bind('#tempRange', '#tempDisplay', 'stt_temp', "0.0");
         this.bind('#lpfRange', '#lpfDisplay', 'stt_lpf', "0.05");
-        this.bind('#pitchGateRange', '#pitchGateDisplay', 'stt_pitch_gate', "199");
-        this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', "0.94", (v) => Speaker.setThreshold(v)); // Default 0.94
+        
+        // GÜNCELLENDİ: 165 -> 170
+        this.bind('#pitchGateRange', '#pitchGateDisplay', 'stt_pitch_gate', "170");
+        
+        // GÜNCELLENDİ: 0.85 -> 0.94
+        this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', "0.94", (v) => Speaker.setThreshold(v)); 
+        
         this.bind('#vadThRange', '#vadThDisplay', 'stt_vad_th', "0.02", (v) => AudioSys.vadThreshold = parseFloat(v));
         this.bind('#vadPauseRange', '#vadPauseDisplay', 'stt_vad_pause', "1500", (v) => AudioSys.vadPauseTime = parseInt(v));
 

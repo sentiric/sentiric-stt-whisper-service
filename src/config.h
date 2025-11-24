@@ -47,7 +47,6 @@ struct Settings {
     bool flash_attn = true;
     bool suppress_nst = true; 
     
-    // YENİ: Speaker Diarization (Konuşmacı Ayrıştırma)
     bool enable_diarization = false; 
 
     int sample_rate = 16000; 
@@ -96,7 +95,6 @@ inline Settings load_settings() {
     s.flash_attn = get_bool("STT_WHISPER_SERVICE_FLASH_ATTN", s.flash_attn);
     s.suppress_nst = get_bool("STT_WHISPER_SERVICE_SUPPRESS_NST", s.suppress_nst);
     
-    // YENİ: Diarization
     s.enable_diarization = get_bool("STT_WHISPER_SERVICE_ENABLE_DIARIZATION", s.enable_diarization);
 
     s.n_threads = get_int("STT_WHISPER_SERVICE_THREADS", s.n_threads);
