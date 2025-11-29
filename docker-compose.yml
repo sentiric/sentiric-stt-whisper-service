@@ -2,13 +2,29 @@
 
 networks:
   sentiric-net:
-    name: "sentiric-net"
+    name: "${NETWORK_NAME:-sentiric.cloud}"
     driver: bridge
+    ipam:
+      config:
+        - subnet: ${NETWORK_SUBNET:-10.88.0.0/16}
+          gateway: ${NETWORK_GATEWAY:-10.88.0.1}
 
-volumes:
-  whisper_models:
+  # =============================================================
+  # KATMAN 4: YAPAY ZEKA UZMAN MOTORLARI (AI EXPERT ENGINES)
+  # Gerçek AI işini yapan, potansiyel olarak yavaş başlayan servisler.
+  # =============================================================
+
+  # [capability-stt]: Konuşma Tanıma Yetenekleri (STT Capabilities)
+  # --------------------------------------------------
+  stt-whisper-models: 
+  stt-whisper-cache:   
 
 services:
+  # =============================================================
+  # KATMAN 4: YAPAY ZEKA UZMAN MOTORLARI (AI EXPERT ENGINES)
+  # Gerçek AI işini yapan, potansiyel olarak yavaş başlayan servisler.
+  # =============================================================
+
   stt-whisper-service:
     restart: unless-stopped
     networks:
@@ -22,7 +38,7 @@ services:
     
     # Model Kalıcılığı
     volumes:
-      - whisper_models:/models
+      - stt-whisper-models:/models
 
     environment:
       # --- Network Ayarları ---
@@ -67,4 +83,4 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 10m

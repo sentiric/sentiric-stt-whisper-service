@@ -48,8 +48,9 @@ RUN mkdir -p /app/dist/bin /app/dist/lib && \
 # --- Çalışma Aşaması ---
 FROM ubuntu:24.04 AS runtime
 
+# FFmpeg eklendi
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libgomp1 curl libsndfile1 && \
+    ca-certificates libgomp1 curl libsndfile1 ffmpeg && \ 
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/dist/bin/* /usr/local/bin/
