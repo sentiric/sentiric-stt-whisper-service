@@ -78,7 +78,7 @@ inline Settings load_settings() {
         return v == "true" || v == "1";
     };
 
-    s.host = get_env("STT_WHISPER_SERVICE_IPV4_ADDRESS", "0.0.0.0");
+    s.host = get_env("STT_WHISPER_SERVICE_LISTEN_ADDRESS", "0.0.0.0");
     s.http_port = get_int("STT_WHISPER_SERVICE_HTTP_PORT", s.http_port);
     s.grpc_port = get_int("STT_WHISPER_SERVICE_GRPC_PORT", s.grpc_port);
     s.metrics_port = get_int("STT_WHISPER_SERVICE_METRICS_PORT", s.metrics_port);
