@@ -5,7 +5,6 @@ const $$ = (s) => document.querySelectorAll(s);
 // 🧹 TEXT CLEANER
 // =============================================================================
 const TextProcessor = {
-    // Whisper Hallucination Listesi (YouTube Kaynaklı Kirli Veriler ve Genel Halüsinasyonlar)
     BANNED_PHRASES: [
         "Sesli Betimleme", "Betimleme", "www.sebeder.com", "altyazı", "Senkron", "TRT", "[Music]",
         "İzlediğiniz için teşekkür ederim", "İzlediğiniz için teşekkürler", "izlediğiniz için teşekkürler",
@@ -16,16 +15,9 @@ const TextProcessor = {
     ],
     isHallucination(text) {
         if (!text || text.length < 2) return true;
-        
-        // 1. Köşeli parantezli ses efektlerini at (Örn: [Rüzgar sesi], [Müzik])
         if (text.match(/^\[.*\]$/)) return true;
-        
-        // 2. Tekrarlanan noktalama işaretleri veya sadece boşluk
         if (text.match(/^[\.,\s\?\!]+$/)) return true;
-
         const lower = text.toLowerCase().trim();
-        
-        // 3. Yasaklı kelime kontrolü (Kısmi eşleşme)
         return this.BANNED_PHRASES.some(phrase => lower.includes(phrase.toLowerCase()));
     },
     clean(text) { return text.trim(); }
@@ -76,17 +68,11 @@ class SystemMonitor {
 const SysMon = new SystemMonitor();
 
 // =============================================================================
-// 🧠 TEMPLATES
-// =============================================================================
-const Templates = { general: "", medical: "tıbbi terminoloji: anamnez, tanı", legal: "hukuki terimler: davacı, hüküm", tech: "teknik terimler: API, JSON" };
-const ViewModes = { heatmap: false, karaoke: true };
-
-// =============================================================================
-// 🧠 SPEAKER SYSTEM (GÜNCELLENDİ)
+// 🧠 SPEAKER SYSTEM
 // =============================================================================
 class SpeakerSystem {
     constructor() {
-        this.threshold = 0.94; // Frontend'de de sıkı tutuyoruz
+        this.threshold = 0.94;
         this.clusters = {}; 
         this.nextId = 0;
         this.colors = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4"];
@@ -119,11 +105,7 @@ class SpeakerSystem {
         const lr = c.count < 5 ? 0.3 : 0.05;
         for(let i=0; i<8; i++) c.centroid[i] = c.centroid[i]*(1-lr) + vector[i]*lr;
         c.count++;
-        // 🛠️ FIX: GENDER OVERRIDE
-        // Eğer yeni segment net bir cinsiyet veriyorsa ve eski etiket '?' veya zıtsa güncelle
-        if(meta.gender && meta.gender !== '?') {
-            c.gender = meta.gender; 
-        }
+        if(meta.gender && meta.gender !== '?') { c.gender = meta.gender; }
     }
     rename(id) {
         const c = this.clusters[id]; if(!c) return;
@@ -184,24 +166,28 @@ const AudioSys = {
     }
 };
 
+const Templates = { general: "", medical: "tıbbi terminoloji: anamnez, tanı", legal: "hukuki terimler: davacı, hüküm", tech: "teknik terimler: API, JSON" };
+const ViewModes = { heatmap: false, karaoke: true };
+
 // =============================================================================
 // 🎨 UI CONTROLLER
 // =============================================================================
 const UI = {
+    // YENİ: Tüm konuşma geçmişini tutacak bellek
+    conversationHistory: [],
+    // Sürekli artan zaman ofseti (her yeni kayıt bir öncekinin sonuna eklenir)
+    globalTimeOffset: 0.0,
+
     init() {
         const tog = (side, s) => { $(`#sidebar${side}`).classList.toggle('active', s); $(`#overlay${side}`).classList.toggle('active', s); };
         $('#mobLeftBtn').onclick = () => tog('Left', true); $('#mobRightBtn').onclick = () => tog('Right', true);
         $('#closeLeft').onclick = () => tog('Left', false); $('#closeRight').onclick = () => tog('Right', false);
         $$('.sidebar-overlay').forEach(o => o.onclick = () => { tog('Left', false); tog('Right', false); });
 
-        // --- FABRİKA AYARLARI GÜNCELLEMESİ ---
         this.bind('#tempRange', '#tempDisplay', 'stt_temp', "0.0");
         this.bind('#lpfRange', '#lpfDisplay', 'stt_lpf', "0.05");
-        
         this.bind('#pitchGateRange', '#pitchGateDisplay', 'stt_pitch_gate', "170");
-        
         this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', "0.94", (v) => Speaker.setThreshold(v)); 
-        
         this.bind('#vadThRange', '#vadThDisplay', 'stt_vad_th', "0.02", (v) => AudioSys.vadThreshold = parseFloat(v));
         this.bind('#vadPauseRange', '#vadPauseDisplay', 'stt_vad_pause', "1500", (v) => AudioSys.vadPauseTime = parseInt(v));
 
@@ -287,7 +273,6 @@ const UI = {
                 const url = URL.createObjectURL(blob);
                 if (!d.segments || d.segments.length === 0) { this.showToast("⚠️ Ses algılandı ama metin çözülemedi."); return; }
                 const renderedCount = this.render(d, durMs, url);
-                // Eğer render edilen segment sayısı 0 ise ve orijinalde segments varsa, hepsi halüsinasyondur.
                 if (renderedCount === 0 && d.segments.length > 0) this.showToast("🚫 Gürültü/Halüsinasyon filtrelendi."); 
                 else this.updateMetrics(durMs, Date.now()-t0, d);
             } else { this.showToast("❌ API Hatası: " + (d.error || "Bilinmiyor")); }
@@ -314,11 +299,22 @@ const UI = {
         let batchHtml = `<div class="transcription-batch" id="${batchId}">`;
 
         segs.forEach((seg, idx) => {
-            // GÜNCELLENDİ: Halüsinasyon Kontrolü
             if (TextProcessor.isHallucination(seg.text)) return; 
             renderedCount++;
 
             const spk = Speaker.identify(seg.speaker_vec, {gender: seg.gender});
+            
+            // YENİ: Global Geçmişe Ekle (Zaman kayması ile)
+            // Her bir segmenti belleğe atıyoruz
+            this.conversationHistory.push({
+                speaker_name: spk.name,
+                speaker_id: spk.id,
+                start_time: this.globalTimeOffset + seg.start,
+                end_time: this.globalTimeOffset + seg.end,
+                text: seg.text,
+                words: seg.words || []
+            });
+
             const emo = { excited:"🔥", sad:"😢", angry:"😠" }[seg.emotion] || "";
             const gen = spk.gender === 'F' ? '👩' : (spk.gender === 'M' ? '👨' : '👤');
             const vec = seg.speaker_vec || [0,0,0,0,0,0,0,0];
@@ -360,6 +356,11 @@ const UI = {
         });
         
         batchHtml += `</div>`; 
+        
+        // Global zamanı ilerlet (Duration milisaniye geliyor, saniyeye çevirip ekle)
+        if(renderedCount > 0) {
+             this.globalTimeOffset += (data.duration || 0);
+        }
 
         if (renderedCount > 0) {
             c.insertAdjacentHTML('beforeend', batchHtml);
@@ -370,7 +371,6 @@ const UI = {
 
     play(el, url, offset) {
         const i = el.querySelector('i');
-        
         if(window.audio) {
             window.audio.pause(); 
             if(window.playBtn) window.playBtn.className='fas fa-play';
@@ -378,42 +378,29 @@ const UI = {
             $$('.w.active-word').forEach(e => e.classList.remove('active-word'));
             if(window.playBtn === i) { window.audio = null; return; }
         }
-
         window.audio = new Audio(url); 
         window.playBtn = i; 
         i.className = 'fas fa-pause'; 
-        
         window.audio.onerror = () => { UI.showToast("Ses dosyası oynatılamadı."); i.className = 'fas fa-play'; };
         window.audio.play().catch(e => console.warn(e));
-
-        const parentBatch = el.closest('.transcription-batch');
         
-        const scopedWords = parentBatch 
-            ? Array.from(parentBatch.querySelectorAll('.w')) 
-            : Array.from(document.querySelectorAll('#transcriptFeed .w'));
+        const parentBatch = el.closest('.transcription-batch');
+        const scopedWords = parentBatch ? Array.from(parentBatch.querySelectorAll('.w')) : [];
 
         if (ViewModes.karaoke && scopedWords.length > 0) {
             const checkKaraoke = () => {
                 if(!window.audio || window.audio.paused) return;
-                
                 const localT = window.audio.currentTime;
-                
                 scopedWords.forEach(w => {
                     const s = parseFloat(w.getAttribute('data-start')); 
                     const e = parseFloat(w.getAttribute('data-end'));
-                    
-                    if (localT >= s && localT <= e) {
-                        if (!w.classList.contains('active-word')) w.classList.add('active-word');
-                    } else {
-                        w.classList.remove('active-word');
-                    }
+                    if (localT >= s && localT <= e) { if (!w.classList.contains('active-word')) w.classList.add('active-word'); } 
+                    else { w.classList.remove('active-word'); }
                 });
-                
                 window.karaokeFrame = requestAnimationFrame(checkKaraoke);
             };
             window.karaokeFrame = requestAnimationFrame(checkKaraoke);
         }
-
         window.audio.onended = () => {
             i.className = 'fas fa-play'; 
             if(window.karaokeFrame) cancelAnimationFrame(window.karaokeFrame);
@@ -433,15 +420,51 @@ const UI = {
         $('#rtfVal').innerText = data.meta?.rtf ? (1/data.meta.rtf).toFixed(1) + 'x' : '0.0x';
         $('#durVal').innerText = (dur/1000).toFixed(2)+'s'; $('#procVal').innerText = (proc/1000).toFixed(2)+'s';
         $('#tokenVal').innerText = data.meta?.tokens || 0;
-        $('#jsonOutput').innerText = JSON.stringify(data, null, 2);
+        // JSON panelini de artık geçmişle güncelle
+        $('#jsonOutput').innerText = JSON.stringify(this.conversationHistory, null, 2);
     },
+    
+    // GÜNCELLENDİ: Artık global history'den export alıyor
     export(t) {
-        let content = ""; const data = JSON.parse($('#jsonOutput').innerText || "{}");
-        if (t === 'json') content = JSON.stringify(data, null, 2);
-        else if (t === 'txt') (data.segments||[]).forEach(s => content += `[${s.start.toFixed(1)}s]: ${s.text}\n`);
-        else if (t === 'srt') (data.segments||[]).forEach((s, i) => { content += `${i+1}\n00:00:${s.start.toFixed(3).replace('.',',')} --> 00:00:${s.end.toFixed(3).replace('.',',')}\n${s.text}\n\n`; });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], {type: 'text/plain'})); a.download = `transcript.${t}`; a.click();
+        if (this.conversationHistory.length === 0) {
+            this.showToast("⚠️ Dışa aktarılacak veri yok.");
+            return;
+        }
+
+        let content = "";
+        
+        if (t === 'json') {
+            content = JSON.stringify(this.conversationHistory, null, 2);
+        } 
+        else if (t === 'txt') {
+            this.conversationHistory.forEach(s => {
+                // [00:12.5] Konuşmacı A: Merhaba
+                const min = Math.floor(s.start_time / 60);
+                const sec = (s.start_time % 60).toFixed(1);
+                const ts = `${String(min).padStart(2,'0')}:${String(sec).padStart(4,'0')}`;
+                content += `[${ts}] ${s.speaker_name}: ${s.text}\n`;
+            });
+        } 
+        else if (t === 'srt') {
+            const fmt = (sec) => {
+                const h = Math.floor(sec/3600);
+                const m = Math.floor((sec%3600)/60);
+                const s = Math.floor(sec%60);
+                const ms = Math.floor((sec%1)*1000);
+                return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')},${String(ms).padStart(3,'0')}`;
+            };
+            
+            this.conversationHistory.forEach((s, i) => {
+                content += `${i+1}\n${fmt(s.start_time)} --> ${fmt(s.end_time)}\n[${s.speaker_name}]: ${s.text}\n\n`;
+            });
+        }
+        
+        const a = document.createElement('a'); 
+        a.href = URL.createObjectURL(new Blob([content], {type: 'text/plain'})); 
+        a.download = `transcript_full.${t}`; 
+        a.click();
     },
+
     startViz() {
         const cv = $('#audioVisualizer'); const ctx = cv.getContext('2d');
         const rsz = () => { cv.width = cv.parentElement.offsetWidth; cv.height = cv.parentElement.offsetHeight; };
@@ -453,6 +476,14 @@ const UI = {
             for(let i=0; i<arr.length; i++) { const h = (arr[i]/255)*cv.height; ctx.fillRect(cv.width/2+x, (cv.height-h)/2, barW, h); ctx.fillRect(cv.width/2-x, (cv.height-h)/2, barW, h); x+=barW+1; }
         }; loop();
     },
-    clear() { $('#transcriptFeed').innerHTML = '<div class="empty-placeholder"><div class="placeholder-icon"><i class="fas fa-microphone-lines"></i></div><h3>Temizlendi</h3></div>'; Speaker.reset(); }
+    
+    clear() { 
+        $('#transcriptFeed').innerHTML = '<div class="empty-placeholder"><div class="placeholder-icon"><i class="fas fa-microphone-lines"></i></div><h3>Temizlendi</h3></div>'; 
+        Speaker.reset(); 
+        // Geçmişi temizle
+        this.conversationHistory = [];
+        this.globalTimeOffset = 0.0;
+        $('#jsonOutput').innerText = "Veri yok...";
+    }
 };
 window.UI = UI; UI.init();
