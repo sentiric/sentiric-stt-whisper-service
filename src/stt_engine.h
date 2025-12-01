@@ -61,7 +61,6 @@ public:
     ~SttEngine();
     bool is_ready() const;
     
-    // Queue metrics için dönüş değerleri güncellendi
     struct PerformanceMetrics {
         double queue_time_ms;
         double processing_time_ms;
@@ -72,7 +71,7 @@ public:
         const std::vector<float>& pcmf32, 
         int input_sample_rate, 
         const RequestOptions& options,
-        PerformanceMetrics* out_metrics = nullptr // Opsiyonel metrik çıktısı
+        PerformanceMetrics* out_metrics = nullptr
     );
     
     std::vector<TranscriptionResult> transcribe_pcm16(
@@ -86,9 +85,7 @@ private:
     std::vector<float> resample_audio(const float* input, size_t input_size, int src_rate, int target_rate);
     bool is_speech_detected(const float* pcm, size_t n_samples);
     
-    // Timeout destekli state acquisition
     struct whisper_state* acquire_state();
-    
     void release_state(struct whisper_state* state);
     
     Settings settings_;
@@ -101,4 +98,22 @@ private:
     std::vector<struct whisper_state*> all_states_;
     
     std::mutex vad_mutex_;
+
+    // RAII Helper for Exception Safety
+    struct StateGuard {
+        SttEngine& engine;
+        struct whisper_state* state;
+
+        StateGuard(SttEngine& e) : engine(e) {
+            state = engine.acquire_state();
+        }
+        
+        ~StateGuard() {
+            if (state) {
+                engine.release_state(state);
+            }
+        }
+        
+        struct whisper_state* get() { return state; }
+    };
 };

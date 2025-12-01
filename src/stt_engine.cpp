@@ -139,12 +139,11 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         }
     }
 
-    struct whisper_state* state = nullptr;
-    try {
-        state = acquire_state();
-    } catch (const EngineBusyException& e) {
-        throw;
-    }
+    // --- RAII GUARD (KRİTİK GÜNCELLEME) ---
+    // State edinimi (acquire) constructor'da, serbest bırakma (release) destructor'da yapılır.
+    // Bu sayede exception olsa bile release garanti edilir.
+    StateGuard guard(*this);
+    struct whisper_state* state = guard.get(); 
 
     auto t_acquired = std::chrono::high_resolution_clock::now();
     
@@ -188,7 +187,7 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     std::vector<TranscriptionResult> results;
     
     if (ret == 0) {
-        // HATA DÜZELTMESİ: `i` parametresi kaldırıldı.
+        // HATA DÜZELTMESİ: whisper_full_n_segments_from_state(state, i) -> i parametresi fazla ve hatalıydı.
         const int n_segments = whisper_full_n_segments_from_state(state);
         
         const float MIN_AVG_TOKEN_PROB = 0.40f;
@@ -240,6 +239,7 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         if (options.should_abort && options.should_abort()) spdlog::warn("Whisper processing aborted.");
         else spdlog::error("Whisper processing failed: {}", ret); 
     }
-    release_state(state);
+    
+    // StateGuard destructor will automatically call release_state(state).
     return results;
 }
