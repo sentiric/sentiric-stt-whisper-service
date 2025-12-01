@@ -10,6 +10,7 @@
 #include <queue>
 #include <condition_variable>
 #include <functional>
+#include <chrono>
 
 struct TokenData {
     std::string text;
@@ -27,10 +28,7 @@ struct RequestOptions {
     int beam_size = -1;
     int best_of = -1;
     
-    // YENİ: Advanced DSP Options
     ProsodyOptions prosody_opts;
-
-    // YENİ: Cancellation Callback (Thread-Safe)
     std::function<bool()> should_abort = nullptr;
 };
 
@@ -42,7 +40,7 @@ struct TranscriptionResult {
     int64_t t1;
     bool speaker_turn_next;
     std::vector<TokenData> tokens;
-    int token_count = 0; // YENİ
+    int token_count = 0;
     std::string gender_proxy;
     std::string emotion_proxy;
     float arousal = 0.0f;
@@ -51,24 +49,56 @@ struct TranscriptionResult {
     std::string speaker_id;
 };
 
+// Hata yönetimi için özel exception
+class EngineBusyException : public std::runtime_error {
+public:
+    EngineBusyException(const std::string& msg) : std::runtime_error(msg) {}
+};
+
 class SttEngine {
 public:
     explicit SttEngine(const Settings& settings);
     ~SttEngine();
     bool is_ready() const;
-    std::vector<TranscriptionResult> transcribe(const std::vector<float>& pcmf32, int input_sample_rate, const RequestOptions& options);
-    std::vector<TranscriptionResult> transcribe_pcm16(const std::vector<int16_t>& pcm16, int input_sample_rate, const RequestOptions& options);
+    
+    // Queue metrics için dönüş değerleri güncellendi
+    struct PerformanceMetrics {
+        double queue_time_ms;
+        double processing_time_ms;
+        int token_count;
+    };
+
+    std::vector<TranscriptionResult> transcribe(
+        const std::vector<float>& pcmf32, 
+        int input_sample_rate, 
+        const RequestOptions& options,
+        PerformanceMetrics* out_metrics = nullptr // Opsiyonel metrik çıktısı
+    );
+    
+    std::vector<TranscriptionResult> transcribe_pcm16(
+        const std::vector<int16_t>& pcm16, 
+        int input_sample_rate, 
+        const RequestOptions& options,
+        PerformanceMetrics* out_metrics = nullptr
+    );
+
 private:
     std::vector<float> resample_audio(const float* input, size_t input_size, int src_rate, int target_rate);
     bool is_speech_detected(const float* pcm, size_t n_samples);
+    
+    // Timeout destekli state acquisition
     struct whisper_state* acquire_state();
+    
     void release_state(struct whisper_state* state);
+    
     Settings settings_;
     struct whisper_context* ctx_ = nullptr;
     struct whisper_vad_context* vad_ctx_ = nullptr;
+    
     std::queue<struct whisper_state*> state_pool_;
     std::mutex pool_mutex_;
     std::condition_variable pool_cv_;
     std::vector<struct whisper_state*> all_states_;
+    
     std::mutex vad_mutex_;
 };

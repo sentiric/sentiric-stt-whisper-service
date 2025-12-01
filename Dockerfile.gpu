@@ -47,6 +47,9 @@ RUN mkdir -p /app/dist/bin /app/dist/lib && \
 # --- Çalışma Aşaması ---
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
 
+# Güvenlik: Kullanıcı Oluşturma
+RUN groupadd -r appuser && useradd -r -g appuser -m -d /home/appuser appuser
+
 # FFmpeg eklendi
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libgomp1 curl libsndfile1 ffmpeg && \ 
@@ -57,8 +60,11 @@ COPY --from=builder /app/vcpkg_installed/x64-linux/lib/*.so* /usr/local/lib/
 COPY --from=builder /app/dist/lib/*.so* /usr/local/lib/
 RUN ldconfig
 
+# Uygulama dosyalarını kopyala ve izinleri ayarla
+WORKDIR /app
 COPY studio /app/studio
-# DÜZELTME: Scripts kaldırıldı
+RUN mkdir -p /models && \
+    chown -R appuser:appuser /app /models
 
 WORKDIR /app
 RUN mkdir -p /models

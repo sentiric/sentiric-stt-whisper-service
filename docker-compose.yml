@@ -9,6 +9,8 @@ networks:
         - subnet: ${NETWORK_SUBNET:-10.88.0.0/16}
           gateway: ${NETWORK_GATEWAY:-10.88.0.1}
 
+volumes:
+
   # =============================================================
   # KATMAN 4: YAPAY ZEKA UZMAN MOTORLARI (AI EXPERT ENGINES)
   # Gerçek AI işini yapan, potansiyel olarak yavaş başlayan servisler.

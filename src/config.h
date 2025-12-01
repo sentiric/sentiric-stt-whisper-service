@@ -29,6 +29,7 @@ struct Settings {
     // --- Performance & Batching ---
     int n_threads = std::min(4, (int)std::thread::hardware_concurrency());
     int parallel_requests = 2; 
+    int request_queue_timeout_ms = 5000;
 
     std::string device = "auto"; 
     std::string compute_type = "int8";
@@ -48,6 +49,14 @@ struct Settings {
     bool suppress_nst = true; 
     
     bool enable_diarization = false; 
+    
+    // -----------------------------------------------------------
+    // 🛠️ ONEMLI: DIARIZATION THRESHOLD TUNING
+    // -----------------------------------------------------------
+    // Eski Değer: 0.85f (Çok toleranslı, herkesi aynı kişi sanıyor)
+    // Yeni Değer: 0.94f (Çok sıkı, en ufak farkta ayırır)
+    // Bu sayede Ezgi (F) ve Can (M) vektörleri benzeşse bile ayrılacak.
+    float cluster_threshold = 0.94f; 
 
     int sample_rate = 16000; 
     std::string log_level = "info";
@@ -96,9 +105,11 @@ inline Settings load_settings() {
     s.suppress_nst = get_bool("STT_WHISPER_SERVICE_SUPPRESS_NST", s.suppress_nst);
     
     s.enable_diarization = get_bool("STT_WHISPER_SERVICE_ENABLE_DIARIZATION", s.enable_diarization);
+    s.cluster_threshold = get_float("STT_WHISPER_SERVICE_CLUSTER_THRESHOLD", s.cluster_threshold);
 
     s.n_threads = get_int("STT_WHISPER_SERVICE_THREADS", s.n_threads);
     s.parallel_requests = get_int("STT_WHISPER_SERVICE_PARALLEL_REQUESTS", s.parallel_requests);
+    s.request_queue_timeout_ms = get_int("STT_WHISPER_SERVICE_QUEUE_TIMEOUT_MS", s.request_queue_timeout_ms);
 
     s.language = get_env("STT_WHISPER_SERVICE_LANGUAGE", s.language);
     s.translate = get_bool("STT_WHISPER_SERVICE_TRANSLATE", s.translate);

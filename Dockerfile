@@ -30,8 +30,7 @@ RUN git clone https://github.com/ggerganov/whisper.cpp.git whisper.cpp && \
 COPY src ./src
 COPY CMakeLists.txt .
 
-# 6. Projeyi Derle (CPU MODE)
-# DÜZELTME: GGML_CUDA=0 yapıldı.
+# 6. Projeyi Derle (CPU MODE - GGML_CUDA=0)
 RUN cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
@@ -48,7 +47,10 @@ RUN mkdir -p /app/dist/bin /app/dist/lib && \
 # --- Çalışma Aşaması ---
 FROM ubuntu:24.04 AS runtime
 
-# FFmpeg eklendi
+# Güvenlik: Kullanıcı Oluşturma
+RUN groupadd -r appuser && useradd -r -g appuser -m -d /home/appuser appuser
+
+# FFmpeg eklendi (MP3/WebM desteği için kritik)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libgomp1 curl libsndfile1 ffmpeg && \ 
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -58,12 +60,16 @@ COPY --from=builder /app/vcpkg_installed/x64-linux/lib/*.so* /usr/local/lib/
 COPY --from=builder /app/dist/lib/*.so* /usr/local/lib/
 RUN ldconfig
 
-COPY studio /app/studio
-# DÜZELTME: Scripts klasörü silindiği için COPY satırı kaldırıldı.
-
+# Uygulama dosyalarını kopyala ve izinleri ayarla
 WORKDIR /app
-RUN mkdir -p /models
+COPY studio /app/studio
+RUN mkdir -p /models && \
+    chown -R appuser:appuser /app /models
 
+# Portlar
 EXPOSE 15030 15031 15032
+
+# Güvenlik: Non-root kullanıcıya geç
+USER appuser
 
 CMD ["stt_service"]

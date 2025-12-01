@@ -43,7 +43,12 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
             filtered_frame[k] = lpf_val;
         }
         float rms = std::sqrt(r0 / safe_frame_size); rmses.push_back(rms);
-        if (rms > 0.05f && last_rms <= 0.05f) peak_count++; last_rms = rms;
+        
+        // HATA DÜZELTMESİ: Girinti ve süslü parantezler eklendi
+        if (rms > 0.05f && last_rms <= 0.05f) {
+            peak_count++; 
+        }
+        last_rms = rms;
 
         float clipping_threshold = std::max(0.002f, rms * 0.15f); 
         int cycles = 0; bool is_positive = false; bool initialized = false; int standard_zcr_count = 0;
@@ -78,10 +83,9 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     // -------------------------------------------------------------------------
     // Ezgi (F) -> ~0.026 - 0.039
     // Can (M)  -> ~0.016 - 0.022
-    // Optimum Eşik: 0.024f
-    
+    // Optimum Eşik: 0.024f    
     bool is_high_pitch = (out.pitch_mean > opts.gender_threshold);
-    bool is_low_zcr = (out.zero_crossing_rate < 0.024f); // <--- KRİTİK GÜNCELLEME
+    bool is_low_zcr = (out.zero_crossing_rate < 0.024f); 
 
     // Oktav Hatası Düzeltme
     if (is_high_pitch && is_low_zcr) {
@@ -106,7 +110,6 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
         out.gender_proxy = "?";
     } else {
         // ZCR 0.030 altındaysa Erkek olarak işaretle (Pitch yüksek kalsa bile)
-        // Bu, clustering için kritik.
         if (out.zero_crossing_rate < 0.030f) out.gender_proxy = "M";
         else out.gender_proxy = (out.pitch_mean > opts.gender_threshold) ? "F" : "M";
     }
@@ -137,16 +140,12 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     // Sorun: Clusterer, Erkek ve Kadın vektörlerini birbirine çok yakın bulup birleştiriyor.
     // Çözüm: Cinsiyete göre Pitch vektörünü yapay olarak uzaklaştırıyoruz.
     // M -> [0.0, 0.4], F -> [0.6, 1.0]
-    // Bu sayede Cosine Similarity düşecek ve yeni Cluster açılacak.
-    
+    // Bu sayede Cosine Similarity düşecek ve yeni Cluster açılacak.    
     out.speaker_vec.resize(8);
     
     if (out.gender_proxy == "M") {
-        // Erkeği vektörün ALT yarısına hapset
         out.speaker_vec[0] = soft_norm(out.pitch_mean, 50.0f, 250.0f) * 0.4f; 
     } else {
-        // Kadını vektörün ÜST yarısına hapset (ve +0.6 offset ekle)
-        // Min 0.6, Max 1.0 olacak
         out.speaker_vec[0] = 0.6f + (soft_norm(out.pitch_mean, 150.0f, 350.0f) * 0.4f);
     }
 

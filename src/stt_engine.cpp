@@ -9,7 +9,6 @@
 #include <numeric>
 #include <cstring>
 
-// C-style callback wrapper for whisper.cpp
 static bool whisper_abort_callback_wrapper(void* user_data) {
     if (user_data) {
         auto* func = static_cast<std::function<bool()>*>(user_data);
@@ -19,7 +18,6 @@ static bool whisper_abort_callback_wrapper(void* user_data) {
 }
 
 SttEngine::SttEngine(const Settings& settings) : settings_(settings) {
-
     std::string model_path = settings_.model_dir + "/" + settings_.model_filename;
     spdlog::info("Loading Whisper model from: {}", model_path);
     struct whisper_context_params cparams = whisper_context_default_params();
@@ -56,7 +54,16 @@ bool SttEngine::is_ready() const { return ctx_ != nullptr; }
 
 struct whisper_state* SttEngine::acquire_state() {
     std::unique_lock<std::mutex> lock(pool_mutex_);
-    pool_cv_.wait(lock, [this]{ return !state_pool_.empty(); });
+    
+    bool acquired = pool_cv_.wait_for(lock, std::chrono::milliseconds(settings_.request_queue_timeout_ms), [this]{ 
+        return !state_pool_.empty(); 
+    });
+
+    if (!acquired) {
+        spdlog::warn("⚠️ Engine overload: No whisper state available after {}ms", settings_.request_queue_timeout_ms);
+        throw EngineBusyException("Server is busy (Queue timeout)");
+    }
+
     struct whisper_state* state = state_pool_.front();
     state_pool_.pop();
     return state;
@@ -90,16 +97,24 @@ bool SttEngine::is_speech_detected(const float* pcm, size_t n_samples) {
 }
 
 std::vector<TranscriptionResult> SttEngine::transcribe_pcm16(
-    const std::vector<int16_t>& pcm16, int input_sample_rate, const RequestOptions& options)
+    const std::vector<int16_t>& pcm16, 
+    int input_sample_rate, 
+    const RequestOptions& options,
+    PerformanceMetrics* out_metrics)
 {
     std::vector<float> pcmf32; pcmf32.reserve(pcm16.size());
     for (const auto& s : pcm16) pcmf32.push_back(static_cast<float>(s) / 32768.0f);
-    return transcribe(pcmf32, input_sample_rate, options);
+    return transcribe(pcmf32, input_sample_rate, options, out_metrics);
 }
 
 std::vector<TranscriptionResult> SttEngine::transcribe(
-    const std::vector<float>& pcmf32, int input_sample_rate, const RequestOptions& options)
+    const std::vector<float>& pcmf32, 
+    int input_sample_rate, 
+    const RequestOptions& options,
+    PerformanceMetrics* out_metrics)
 {
+    auto t_start = std::chrono::high_resolution_clock::now();
+
     if (!ctx_) return {};
     if (options.should_abort && options.should_abort()) return {};
 
@@ -115,7 +130,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
 
     if (settings_.enable_vad && pcm_size > (16000 * 0.2)) {
         if (!is_speech_detected(pcm_ptr, pcm_size)) {
-            // ... (Boş sonuç dönüşü aynı) ...
             TranscriptionResult empty_res; empty_res.text = ""; empty_res.language = "unknown"; empty_res.prob = 0.0f;
             empty_res.t0 = 0; empty_res.t1 = static_cast<int64_t>(pcm_size / 16.0); empty_res.speaker_turn_next = false;
             empty_res.token_count = 0;
@@ -125,18 +139,21 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         }
     }
 
-    struct whisper_state* state = acquire_state();
+    struct whisper_state* state = nullptr;
+    try {
+        state = acquire_state();
+    } catch (const EngineBusyException& e) {
+        throw;
+    }
+
+    auto t_acquired = std::chrono::high_resolution_clock::now();
     
     // -----------------------------------------------------------
-    // 🛠️ FIX: DIARIZATION THRESHOLD TUNING
+    // FIX: DIARIZATION THRESHOLD FROM CONFIG
     // -----------------------------------------------------------
-    // Eski Değer: 0.85f (Çok toleranslı, herkesi aynı kişi sanıyor)
-    // Yeni Değer: 0.94f (Çok sıkı, en ufak farkta ayırır)
-    // Bu sayede Ezgi (F) ve Can (M) vektörleri benzeşse bile ayrılacak.
-    SpeakerClusterer clusterer(0.94f); 
+    SpeakerClusterer clusterer(settings_.cluster_threshold); 
     // -----------------------------------------------------------
 
-    // ... (Whisper parametre ayarları aynı) ...
     int active_beam_size = (options.beam_size >= 0) ? options.beam_size : settings_.beam_size;
     float active_temp = (options.temperature >= 0.0f) ? options.temperature : settings_.temperature;
     int active_best_of = (options.best_of >= 0) ? options.best_of : settings_.best_of;
@@ -159,10 +176,21 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.entropy_thold = 2.40f; wparams.logprob_thold = settings_.logprob_threshold; wparams.n_threads = settings_.n_threads;
     
     int ret = whisper_full_with_state(ctx_, state, wparams, pcm_ptr, static_cast<int>(pcm_size));
+    
+    auto t_end = std::chrono::high_resolution_clock::now();
+
+    if (out_metrics) {
+        out_metrics->queue_time_ms = std::chrono::duration<double, std::milli>(t_acquired - t_start).count();
+        out_metrics->processing_time_ms = std::chrono::duration<double, std::milli>(t_end - t_acquired).count();
+        out_metrics->token_count = 0;
+    }
+
     std::vector<TranscriptionResult> results;
     
     if (ret == 0) {
+        // HATA DÜZELTMESİ: `i` parametresi kaldırıldı.
         const int n_segments = whisper_full_n_segments_from_state(state);
+        
         const float MIN_AVG_TOKEN_PROB = 0.40f;
         for (int i = 0; i < n_segments; ++i) {
             const char* text = whisper_full_get_segment_text_from_state(state, i);
@@ -170,7 +198,6 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             const int64_t t1 = whisper_full_get_segment_t1_from_state(state, i);
             bool speaker_turn_next = whisper_full_get_segment_speaker_turn_next_from_state(state, i);
             
-            // ... (Token extraction aynı) ...
             std::vector<TokenData> tokens;
             int n_tokens = whisper_full_n_tokens_from_state(state, i);
             double total_prob = 0.0; int valid_token_count = 0;
@@ -181,6 +208,9 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
                 tokens.push_back({std::string(token_text), data.p, data.t0, data.t1});
                 total_prob += data.p; ++valid_token_count;
             }
+            
+            if (out_metrics) out_metrics->token_count += valid_token_count;
+
             float avg_prob = (valid_token_count > 0) ? static_cast<float>(total_prob / valid_token_count) : 0.0f;
             if (avg_prob < MIN_AVG_TOKEN_PROB && valid_token_count > 0) continue;
 

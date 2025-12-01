@@ -18,6 +18,7 @@ grpc::Status GrpcServer::WhisperTranscribe(
 {
     metrics_.requests_total.Increment();
     auto start_time = std::chrono::steady_clock::now();
+    
     if (!engine_->is_ready()) return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Model not ready");
     const std::string& audio_blob = request->audio_data();
     if (audio_blob.empty()) return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Audio data is empty");
@@ -34,20 +35,32 @@ grpc::Status GrpcServer::WhisperTranscribe(
     // gRPC Context üzerinden Abort kontrolü
     options.should_abort = [context]() { return context->IsCancelled(); };
 
-    auto results = engine_->transcribe_pcm16(audio.pcm_data, audio.sample_rate, options);
+    // Performans ve Hata Yönetimi
+    SttEngine::PerformanceMetrics perf = {0,0,0};
+    std::vector<TranscriptionResult> results;
+
+    try {
+        // Transkripsiyonu başlat (Kuyruk beklemesi burada olur)
+        results = engine_->transcribe_pcm16(audio.pcm_data, audio.sample_rate, options, &perf);
+    } catch (const EngineBusyException& e) {
+        spdlog::error("Request dropped (Queue Full/Timeout): {}", e.what());
+        // İstemciye "Kaynak Tükendi" hatası dön (Load Balancer bunu görüp başka yere yönlendirebilir)
+        return grpc::Status(grpc::StatusCode::RESOURCE_EXHAUSTED, e.what());
+    } catch (const std::exception& e) {
+        spdlog::error("Internal engine error: {}", e.what());
+        return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
+    }
     
     // Check if empty results due to abort
     if (context->IsCancelled()) return grpc::Status::CANCELLED;
 
     std::string full_text; float avg_prob = 0.0f; std::string main_lang = "unknown";
-    int total_tokens = 0;
 
     if (!results.empty()) {
         main_lang = results[0].language;
         for (const auto& res : results) { 
             full_text += res.text; 
             avg_prob += res.prob; 
-            total_tokens += res.token_count;
         }
         avg_prob /= results.size();
     }
@@ -73,14 +86,16 @@ grpc::Status GrpcServer::WhisperTranscribe(
     }
     
     metrics_.audio_seconds_processed_total.Increment(duration_sec);
-    metrics_.tokens_generated_total.Increment(total_tokens); // METRIC
+    metrics_.tokens_generated_total.Increment(perf.token_count); 
 
     auto end_time = std::chrono::steady_clock::now();
     std::chrono::duration<double> latency = end_time - start_time;
     metrics_.request_latency.Observe(latency.count());
     
-    double tps = (latency.count() > 0) ? total_tokens / latency.count() : 0.0;
-    spdlog::info("gRPC Unary: {:.2f}s Audio -> {} Tokens ({:.1f} TPS), Latency: {:.2f}s", duration_sec, total_tokens, tps, latency.count());
+    // Detaylı Log (Kuyruk süresi ve işlem süresi ayrı)
+    spdlog::info("gRPC Unary: {:.2f}s Audio -> {} Tokens. Q-Time: {:.1f}ms, Proc-Time: {:.1f}ms, Total: {:.2f}s", 
+                 duration_sec, perf.token_count, perf.queue_time_ms, perf.processing_time_ms, latency.count());
+
     return grpc::Status::OK;
 }
 
@@ -91,10 +106,12 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     metrics_.requests_total.Increment();
     auto start_time = std::chrono::steady_clock::now();
     if (!engine_->is_ready()) return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Model not ready");
+    
     sentiric::stt::v1::WhisperTranscribeStreamRequest request;
     std::vector<int16_t> full_pcm_buffer;
     bool is_first_chunk = true; bool is_wav_container = false; size_t wav_header_skip = 0;
     
+    // Akışı oku ve birleştir
     while (stream->Read(&request)) {
         if (context->IsCancelled()) return grpc::Status::CANCELLED; // Erken çıkış
 
@@ -125,17 +142,28 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     RequestOptions options;
     options.should_abort = [context]() { return context->IsCancelled(); };
     
-    auto results = engine_->transcribe_pcm16(full_pcm_buffer, 16000, options);
+    SttEngine::PerformanceMetrics perf = {0,0,0};
+    std::vector<TranscriptionResult> results;
+
+    try {
+        // Transkripsiyonu başlat (Kuyruk beklemesi burada olur)
+        results = engine_->transcribe_pcm16(full_pcm_buffer, 16000, options, &perf);
+    } catch (const EngineBusyException& e) {
+        spdlog::error("Stream dropped (Queue Full/Timeout): {}", e.what());
+        return grpc::Status(grpc::StatusCode::RESOURCE_EXHAUSTED, e.what());
+    } catch (const std::exception& e) {
+        spdlog::error("Stream internal error: {}", e.what());
+        return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
+    }
     
     if (context->IsCancelled()) return grpc::Status::CANCELLED;
 
-    int total_tokens = 0;
     for (size_t i = 0; i < results.size(); ++i) {
         sentiric::stt::v1::WhisperTranscribeStreamResponse response;
         response.set_transcription(results[i].text);
         response.set_is_final(i == results.size() - 1);
         const auto& aff = results[i].affective;
-        // ... (Field mapping same as before) ...
+        
         response.set_gender_proxy(aff.gender_proxy);
         response.set_emotion_proxy(aff.emotion_proxy);
         response.set_arousal(aff.arousal);
@@ -150,16 +178,17 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
         
         // Gönderim başarısız olursa (Client koptuysa) durdur
         if (!stream->Write(response)) break;
-        total_tokens += results[i].token_count;
     }
     
     double duration_sec = static_cast<double>(full_pcm_buffer.size()) / 16000.0;
     metrics_.audio_seconds_processed_total.Increment(duration_sec);
-    metrics_.tokens_generated_total.Increment(total_tokens);
+    metrics_.tokens_generated_total.Increment(perf.token_count);
     
     auto end_time = std::chrono::steady_clock::now(); std::chrono::duration<double> latency = end_time - start_time;
     metrics_.request_latency.Observe(latency.count());
     
-    spdlog::info("gRPC Stream Finished. Processed {:.2f}s, Tokens: {}", duration_sec, total_tokens);
+    spdlog::info("gRPC Stream: {:.2f}s Audio -> {} Tokens. Q-Time: {:.1f}ms, Proc-Time: {:.1f}ms", 
+                 duration_sec, perf.token_count, perf.queue_time_ms, perf.processing_time_ms);
+
     return grpc::Status::OK;
 }
