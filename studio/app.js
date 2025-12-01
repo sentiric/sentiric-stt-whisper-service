@@ -5,11 +5,27 @@ const $$ = (s) => document.querySelectorAll(s);
 // 🧹 TEXT CLEANER
 // =============================================================================
 const TextProcessor = {
-    BANNED_PHRASES: ["Sesli Betimleme", "Betimleme", "www.sebeder.com", "altyazı", "Senkron", "TRT", "[Music]"],
+    // Whisper Hallucination Listesi (YouTube Kaynaklı Kirli Veriler ve Genel Halüsinasyonlar)
+    BANNED_PHRASES: [
+        "Sesli Betimleme", "Betimleme", "www.sebeder.com", "altyazı", "Senkron", "TRT", "[Music]",
+        "İzlediğiniz için teşekkür ederim", "İzlediğiniz için teşekkürler", "izlediğiniz için teşekkürler",
+        "Abone ol", "Abone olmayı", "Videoyu beğen", "kanalıma abone",
+        "Altyazı M.K.", "Altyazı...", "Altyazı", 
+        "Devam edecek", "Bir sonraki videoda",
+        "çeviri:", "altyazı:", "subtitle:", "transcription:"
+    ],
     isHallucination(text) {
         if (!text || text.length < 2) return true;
+        
+        // 1. Köşeli parantezli ses efektlerini at (Örn: [Rüzgar sesi], [Müzik])
         if (text.match(/^\[.*\]$/)) return true;
-        const lower = text.toLowerCase();
+        
+        // 2. Tekrarlanan noktalama işaretleri veya sadece boşluk
+        if (text.match(/^[\.,\s\?\!]+$/)) return true;
+
+        const lower = text.toLowerCase().trim();
+        
+        // 3. Yasaklı kelime kontrolü (Kısmi eşleşme)
         return this.BANNED_PHRASES.some(phrase => lower.includes(phrase.toLowerCase()));
     },
     clean(text) { return text.trim(); }
@@ -179,16 +195,11 @@ const UI = {
         $$('.sidebar-overlay').forEach(o => o.onclick = () => { tog('Left', false); tog('Right', false); });
 
         // --- FABRİKA AYARLARI GÜNCELLEMESİ ---
-        // Pitch Gate: 170Hz (Kadın/Erkek sınırı). ZCR bunu override edeceği için güvenli.
-        // Cluster: 0.94 (Ezgi ve Can'ı ayıran değer).
-        
         this.bind('#tempRange', '#tempDisplay', 'stt_temp', "0.0");
         this.bind('#lpfRange', '#lpfDisplay', 'stt_lpf', "0.05");
         
-        // GÜNCELLENDİ: 165 -> 170
         this.bind('#pitchGateRange', '#pitchGateDisplay', 'stt_pitch_gate', "170");
         
-        // GÜNCELLENDİ: 0.85 -> 0.94
         this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', "0.94", (v) => Speaker.setThreshold(v)); 
         
         this.bind('#vadThRange', '#vadThDisplay', 'stt_vad_th', "0.02", (v) => AudioSys.vadThreshold = parseFloat(v));
@@ -276,7 +287,9 @@ const UI = {
                 const url = URL.createObjectURL(blob);
                 if (!d.segments || d.segments.length === 0) { this.showToast("⚠️ Ses algılandı ama metin çözülemedi."); return; }
                 const renderedCount = this.render(d, durMs, url);
-                if (renderedCount === 0) this.showToast("🚫 Sonuç filtrelendi."); else this.updateMetrics(durMs, Date.now()-t0, d);
+                // Eğer render edilen segment sayısı 0 ise ve orijinalde segments varsa, hepsi halüsinasyondur.
+                if (renderedCount === 0 && d.segments.length > 0) this.showToast("🚫 Gürültü/Halüsinasyon filtrelendi."); 
+                else this.updateMetrics(durMs, Date.now()-t0, d);
             } else { this.showToast("❌ API Hatası: " + (d.error || "Bilinmiyor")); }
         } catch(e) { this.removeLoading(tempId); console.error(e); this.showToast("❌ Bağlantı Hatası"); }
     },
@@ -290,7 +303,6 @@ const UI = {
         setTimeout(() => { t.style.opacity = '0'; t.style.bottom = '100px'; setTimeout(() => t.remove(), 300); }, 3000);
     },    
 
-    // --- RENDER GÜNCELLEMESİ (BATCH ISOLATION) ---
     render(data, dur, url) {
         const c = $('#transcriptFeed');
         $('.empty-placeholder')?.remove();
@@ -298,13 +310,11 @@ const UI = {
         const segs = data.segments && data.segments.length ? data.segments : (data.text ? [{text: data.text, start:0, speaker_vec:[], gender:'?', words:[]}] : []);
         let renderedCount = 0;
 
-        // YENİ: Her render işlemi için benzersiz bir Batch ID oluştur
         const batchId = `tx-batch-${Date.now()}`;
-        
-        // HTML string'i biriktireceğiz, direkt DOM'a basmayacağız
         let batchHtml = `<div class="transcription-batch" id="${batchId}">`;
 
         segs.forEach((seg, idx) => {
+            // GÜNCELLENDİ: Halüsinasyon Kontrolü
             if (TextProcessor.isHallucination(seg.text)) return; 
             renderedCount++;
 
@@ -349,7 +359,7 @@ const UI = {
             </div>`;
         });
         
-        batchHtml += `</div>`; // Kapanış div'i
+        batchHtml += `</div>`; 
 
         if (renderedCount > 0) {
             c.insertAdjacentHTML('beforeend', batchHtml);
@@ -358,7 +368,6 @@ const UI = {
         return renderedCount;
     },
 
-    // --- PLAY GÜNCELLEMESİ (SCOPED KARAOKE) ---
     play(el, url, offset) {
         const i = el.querySelector('i');
         
@@ -366,7 +375,6 @@ const UI = {
             window.audio.pause(); 
             if(window.playBtn) window.playBtn.className='fas fa-play';
             if(window.karaokeFrame) cancelAnimationFrame(window.karaokeFrame);
-            // Sadece aktif kelimeleri temizle
             $$('.w.active-word').forEach(e => e.classList.remove('active-word'));
             if(window.playBtn === i) { window.audio = null; return; }
         }
@@ -378,11 +386,8 @@ const UI = {
         window.audio.onerror = () => { UI.showToast("Ses dosyası oynatılamadı."); i.className = 'fas fa-play'; };
         window.audio.play().catch(e => console.warn(e));
 
-        // 🛠️ FIX: SADECE KENDİ BATCH'İNİ SEÇ
-        // play butonunun içinde bulunduğu en yakın 'transcription-batch' div'ini bul
         const parentBatch = el.closest('.transcription-batch');
         
-        // Eğer batch bulunduysa sadece oradaki kelimeleri al, yoksa (eski versiyonlar için) global al
         const scopedWords = parentBatch 
             ? Array.from(parentBatch.querySelectorAll('.w')) 
             : Array.from(document.querySelectorAll('#transcriptFeed .w'));

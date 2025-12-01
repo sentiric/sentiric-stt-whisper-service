@@ -42,20 +42,15 @@ struct Settings {
     int beam_size = 5;
     float temperature = 0.0f;
     int best_of = 5;
-    float logprob_threshold = -1.0f;
-    float no_speech_threshold = 0.6f;
+    
+    // GÜNCELLEME: Halüsinasyonları engellemek için daha agresif varsayılanlar
+    float logprob_threshold = -0.8f; // Eskisi: -1.0
+    float no_speech_threshold = 0.9f; // Eskisi: 0.6 (Kritik Düzeltme)
     
     bool flash_attn = true;
     bool suppress_nst = true; 
     
     bool enable_diarization = false; 
-    
-    // -----------------------------------------------------------
-    // 🛠️ ONEMLI: DIARIZATION THRESHOLD TUNING
-    // -----------------------------------------------------------
-    // Eski Değer: 0.85f (Çok toleranslı, herkesi aynı kişi sanıyor)
-    // Yeni Değer: 0.94f (Çok sıkı, en ufak farkta ayırır)
-    // Bu sayede Ezgi (F) ve Can (M) vektörleri benzeşse bile ayrılacak.
     float cluster_threshold = 0.94f; 
 
     int sample_rate = 16000; 
@@ -117,6 +112,8 @@ inline Settings load_settings() {
     s.beam_size = get_int("STT_WHISPER_SERVICE_BEAM_SIZE", s.beam_size);
     s.temperature = get_float("STT_WHISPER_SERVICE_TEMPERATURE", s.temperature);
     s.best_of = get_int("STT_WHISPER_SERVICE_BEST_OF", s.best_of);
+    
+    // Config'den de okunabilir olsun
     s.logprob_threshold = get_float("STT_WHISPER_SERVICE_LOGPROB_THRESHOLD", s.logprob_threshold);
     s.no_speech_threshold = get_float("STT_WHISPER_SERVICE_NO_SPEECH_THRESHOLD", s.no_speech_threshold);
 

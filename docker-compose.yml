@@ -9,8 +9,8 @@ networks:
         - subnet: ${NETWORK_SUBNET:-10.88.0.0/16}
           gateway: ${NETWORK_GATEWAY:-10.88.0.1}
 
-volumes:
 
+volumes:
   # =============================================================
   # KATMAN 4: YAPAY ZEKA UZMAN MOTORLARI (AI EXPERT ENGINES)
   # Gerçek AI işini yapan, potansiyel olarak yavaş başlayan servisler.
@@ -58,22 +58,27 @@ services:
       # --- Motor ve Performans ---
       - STT_WHISPER_SERVICE_THREADS=4
       - STT_WHISPER_SERVICE_DEVICE=auto
-      # YENİ: Dynamic Batching (Aynı anda işlenecek istek sayısı)
+      # Dynamic Batching (Aynı anda işlenecek istek sayısı)
       - STT_WHISPER_SERVICE_PARALLEL_REQUESTS=2
+      # Queue Timeout (Kuyrukta bekleme süresi ms) - CPU için uzun tutuyoruz
+      - STT_WHISPER_SERVICE_QUEUE_TIMEOUT_MS=60000
       
       # --- Transkripsiyon Ayarları ---
       - STT_WHISPER_SERVICE_LANGUAGE=auto
       - STT_WHISPER_SERVICE_TRANSLATE=false
-      # YENİ: Konuşmacı Ayrıştırma (Varsayılan Açık)
+      # Konuşmacı Ayrıştırma
       - STT_WHISPER_SERVICE_ENABLE_DIARIZATION=true
       - STT_WHISPER_SERVICE_ENABLE_VAD=true
       
-      # --- Gelişmiş Ayarlar ---
+      # --- Gelişmiş Ayarlar (Halüsinasyon Önleme) ---
       - STT_WHISPER_SERVICE_BEAM_SIZE=5
       - STT_WHISPER_SERVICE_TEMPERATURE=0.0
       - STT_WHISPER_SERVICE_BEST_OF=5
-      - STT_WHISPER_SERVICE_LOGPROB_THRESHOLD=-1.0
-      - STT_WHISPER_SERVICE_NO_SPEECH_THRESHOLD=0.6
+      # GÜNCELLENDİ: Düşük güvenli kelimeleri at
+      - STT_WHISPER_SERVICE_LOGPROB_THRESHOLD=-0.8
+      # GÜNCELLENDİ: Sessizlikte konuşma algılama eşiği (Sıkılaştırıldı)
+      - STT_WHISPER_SERVICE_NO_SPEECH_THRESHOLD=0.9
+      
       - STT_WHISPER_SERVICE_FLASH_ATTN=true
       - STT_WHISPER_SERVICE_SUPPRESS_NST=false
       
