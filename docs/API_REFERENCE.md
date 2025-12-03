@@ -2,9 +2,9 @@
 
 Bu belge, Sentiric STT Whisper Servisi'nin dış dünyaya sunduğu **gRPC** ve **HTTP (REST)** arayüzlerini tanımlar.
 
-## 1. gRPC Servisi: `SttWhisperService`
+## 1. gRPC Servisi: `SttWhisperService` (Dahili / Yüksek Performans)
 
-Bu servis, yüksek performanslı ve düşük gecikmeli iletişim için ana arayüzdür. Kontratlar `sentiric-contracts` reposunda tanımlanmıştır.
+Bu servis, Sentiric ekosistemi içindeki diğer servisler (Gateway, Agent) ile haberleşmek için kullanılır. Kontratlar `sentiric-contracts` reposunda tanımlanmıştır.
 
 ### 1.1. Servis Tanımı
 ```protobuf
@@ -17,126 +17,88 @@ service SttWhisperService {
 }
 ```
 
-### 1.2. Mesaj Tipleri
-**WhisperTranscribeRequest**
-*   `bytes audio_data`: Ham ses verisi (WAV headerlı veya headersız PCM).
-*   `string language`: (Opsiyonel) "tr", "en" vb.
-    *   ℹ️ **Not:** Eğer bu alan dolu gönderilirse, sunucudaki `STT_WHISPER_SERVICE_LANGUAGE` ayarını **geçersiz kılar (override)** ve bu dili kullanır.
-
-**WhisperTranscribeResponse**
-*   `string transcription`: Üretilen metin.
-*   `string language`: Algılanan dil.
-*   `float language_probability`: Güven skoru.
-*   `double duration`: Ses süresi (saniye).
-
 ---
 
-## 2. HTTP REST API
+## 2. HTTP REST API (Harici / Standalone Kullanım)
 
-Web istemcileri (Omni-Studio) ve basit entegrasyonlar için sunulan endpoint'ler.
+Web istemcileri, mobil uygulamalar ve 3. parti entegrasyonlar için sunulan standart REST arayüzü.
 
 ### 2.1. Transkripsiyon (`POST /v1/transcribe`)
-Ses dosyasını yükleyerek metin çıktısı alır.
 
+Ses dosyasını yükleyerek zenginleştirilmiş metin ve analiz çıktısı alır.
+
+*   **URL:** `http://localhost:15030/v1/transcribe`
+*   **Method:** `POST`
 *   **Content-Type:** `multipart/form-data`
-*   **Parametre:** `file` (Binary ses dosyası - WAV önerilir)
-*   **Örnek Yanıt:**
-    ```json
-    {
-      "text": "Merhaba dünya.",
-      "language": "tr",
-      "duration": 2.5
-    }
-    ```
-*   **Dil Seçimi:** Şu an için REST API her zaman `STT_WHISPER_SERVICE_LANGUAGE` (Env Var) değerini veya Otomatik Algılamayı kullanır.
 
-### 2.2. Sağlık Kontrolü (`GET /health`)
-Servisin ve modelin durumunu bildirir. Orchestrator (K8s) liveness probe için kullanılır.
+#### **Parametreler (Form Data)**
 
-*   **Başarılı (200 OK):**
-    ```json
-    {
-      "status": "healthy",
-      "model_ready": true,
-      "service": "sentiric-stt-whisper-service",
-      "version": "2.0.0"
-    }
-    ```
-*   **Başarısız (503 Service Unavailable):** Model henüz yüklenmediyse veya hata varsa.
+| Parametre | Tip | Zorunlu | Varsayılan | Açıklama |
+|---|---|---|---|---|
+| `file` | File | **Evet** | - | İşlenecek ses dosyası (WAV, MP3, WebM desteklenir). |
+| `language` | String | Hayır | `auto` | Kaynak dil kodu (örn: `tr`, `en`). |
+| `prompt` | String | Hayır | - | Modele bağlam (context) veya stil ipucu vermek için metin. |
+| `diarization` | Bool | Hayır | `true` | Konuşmacı ayrıştırmayı etkinleştir (`true`/`false`). |
+| `temperature` | Float | Hayır | `0.0` | Modelin "yaratıcılığı". Düşük değerler daha deterministiktir. |
+| `prosody_pitch_gate` | Int | Hayır | `170` | Cinsiyet ayrımı için frekans eşiği (Hz). |
 
----
+#### **Başarılı Yanıt (200 OK)**
 
-## 3. Teknik Sınırlamalar ve Standartlar
-
-1.  **Ses Formatı:** Servis dahili olarak **16kHz** örnekleme hızı kullanır. Farklı formatlar (örn: 8kHz) otomatik olarak dönüştürülür (`libsamplerate` ile), ancak en iyi performans için 16kHz WAV önerilir.
-2.  **Concurrency:** `STT_WHISPER_SERVICE_THREADS` ortam değişkeni ile CPU thread kullanımı sınırlanabilir. Varsayılan: 4.
-
-# 📚 Dökümana Ekleme – "Ne Nedir?" Açıklamaları
-
-Aşağıdaki **tam metinleri**  
-`docs/API_REFERENCE.md` **sonuna** **kopyala-yapıştır** – **commit** ile **birlikte** gitsin.
-
----
-
-## 🆕 9. Yeni Duygu & Konuşmacı Kimliği Alanları (v2.4.0)
-
-Bu bölüm, **zero-latency** prosody analizi ile elde edilen **duygu**, **cinsiyet** ve **konuşmacı vektörü** alanlarını açıklar.  
-**Hiçbir ek model** yüklenmez; **sadece whisper.cpp çıktısı** kullanılır.
-
-### 9.1 Affective Proxies (Duygu & Cinsiyet)
-
-| Alan | Tip | Birim | Açıklama |
-|---|---|---|---|
-| `gender_proxy` | `string` | - | **"M"** veya **"F"** – *pitch mean > 165 Hz → F* |
-| `emotion_proxy` | `string` | - | **"excited"**, **"neutral"**, **"sad"**, **"angry"** <br> *arousal + valence kural tabanı* |
-| `arousal` | `float` | 0-1 | **Enerji düzeyi** – *RMS energy × 20* |
-| `valence` | `float` | -1..1 | **Pozitiflik** – *pitch mean’e göre* |
-
-> **Not**: Bu değerler **proxy**’dir; **%100 doğruluk** garantisi **yoktur**, **UI** için **görsel ipucu** sağlar.
-
----
-
-### 9.2 Prosodic Features (Pitch & Timbre)
-
-| Alan | Tip | Birim | Açıklama |
-|---|---|---|---|
-| `pitch_mean` | `float` | Hz | Segmentin **ortalama temel frekansı** |
-| `pitch_std` | `float` | Hz | **Pitch değişkenliği** (standart sapma) |
-| `energy_mean` | `float` | RMS | **Ortalama ses şiddeti** |
-| `energy_std` | `float` | RMS | **Enerji değişkenliği** |
-| `spectral_centroid` | `float` | k | **Timbre parlaklığı** (kaba proxy) |
-| `zero_crossing_rate` | `float` | 0-1 | **Sinyal "keskinliği"** (yüksek = tiz)**
-
----
-
-### 9.3 Speaker Identity Vector
-
-| Alan | Tip | Boyut | Açıklama |
-|---|---|---|---|
-| `speaker_vec` | `[]float` | **8** | **Pitch, Energy, Timbre** özelliklerinin **normalize** hali: <br> `[pitch/300, pitch_std/50, energy, energy_std, spectral/1000, zcr, arousal, (valence+1)/2]` |
-
-> **Kullanım**:  
-> - **Aynı vektör** → **aynı konuşmacı** (UI’da **aynı renk**)  
-> - **Farklı vektör** → **yeni konuşmacı** (UI’da **yeni renk**)  
-> - **Tıkla** → **isim ver** (localStorage saklanır)
-
----
-
-### 9.4 Örnek JSON Parçası
 ```json
 {
-  "gender": "F",
-  "emotion": "excited",
-  "arousal": 0.82,
-  "valence": 0.55,
-  "pitch_mean": 210.3,
-  "pitch_std": 18.4,
-  "energy_mean": 0.08,
-  "energy_std": 0.01,
-  "spectral_centroid": 85.7,
-  "zero_crossing_rate": 0.31,
-  "speaker_vec": [0.71, 0.37, 0.08, 0.01, 0.086, 0.31, 0.82, 0.77]
+  "text": "Merhaba, Sentiric platformuna hoş geldiniz.",
+  "language": "tr",
+  "duration": 3.45,
+  "segments": [
+    {
+      "text": "Merhaba, Sentiric platformuna hoş geldiniz.",
+      "start": 0.0,
+      "end": 3.45,
+      "probability": 0.98,
+      "speaker_id": "spk_0",
+      "speaker_turn_next": false,
+      
+      // --- Duyuşsal Analiz (Affective Intelligence) ---
+      "gender": "F",           // Tahmini Cinsiyet (F/M)
+      "emotion": "neutral",    // Tahmini Duygu
+      "arousal": 0.45,         // Enerji Seviyesi (0.0 - 1.0)
+      "valence": 0.10,         // Pozitiflik Seviyesi (-1.0 - 1.0)
+      "pitch_mean": 215.4,     // Ortalama Ses Frekansı (Hz)
+      "pitch_std": 12.1,       // Frekans Değişkenliği
+      
+      // --- Kelime Detayları ---
+      "words": [
+        { "word": "Merhaba", "start": 0.0, "end": 0.8, "probability": 0.99 },
+        { "word": "Sentiric", "start": 0.9, "end": 1.5, "probability": 0.95 },
+        // ...
+      ]
+    }
+  ],
+  "meta": {
+    "processing_time": 0.42, // Saniye cinsinden işlem süresi
+    "rtf": 8.2,              // Real-Time Factor (Hız katsayısı)
+    "tokens": 12             // Üretilen token sayısı
+  }
 }
 ```
 
----
+#### **Hata Yanıtı (4xx/5xx)**
+
+```json
+{
+  "error": "Model not ready" // veya "Invalid audio format"
+}
+```
+
+### 2.2. Sağlık Kontrolü (`GET /health`)
+Servisin ve modelin durumunu bildirir. Yük dengeleyiciler ve Kubernetes liveness probe'ları için kullanılır.
+
+```json
+{
+  "status": "healthy",
+  "model_ready": true,
+  "service": "sentiric-stt-whisper-service",
+  "version": "2.5.1",
+  "api_compatibility": "openai-whisper"
+}
+```

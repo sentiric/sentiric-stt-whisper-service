@@ -18,6 +18,21 @@ MetricsServer::MetricsServer(const std::string& host, int port, prometheus::Regi
         auto collected_metrics = this->registry_.Collect();
         std::stringstream ss; serializer.Serialize(ss, collected_metrics);
         
+        // NOT: Production ortamında '*' yerine belirli domainlerin (örn: dashboard domaini)
+        // verilmesi güvenlik açısından daha doğrudur. Standalone kullanım kolaylığı için '*' bırakılmıştır.
+        res.set_header("Access-Control-Allow-Origin", "*"); 
+        res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type");
+        
+        res.set_content(ss.str(), "text/plain; version=0.0.4");
+    });
+            
+    // YENİ: CORS Headerları eklendi. Omni-Studio (15030) buradan (15032) veri çekebilsin.
+    svr_.Get("/metrics", [this](const httplib::Request &, httplib::Response &res) {
+        prometheus::TextSerializer serializer;
+        auto collected_metrics = this->registry_.Collect();
+        std::stringstream ss; serializer.Serialize(ss, collected_metrics);
+        
         res.set_header("Access-Control-Allow-Origin", "*"); // KRİTİK: Tarayıcı erişimi için
         res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type");

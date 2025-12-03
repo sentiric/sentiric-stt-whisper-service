@@ -1,86 +1,100 @@
 # 🎧 Sentiric STT Whisper Service (v2.5.1)
 
-[![CI - Build and Push Docker Image](https://github.com/sentiric/sentiric-stt-whisper-service/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/sentiric/sentiric-stt-whisper-service/actions/workflows/build-and-push.yml)
+[![Production Ready](https://img.shields.io/badge/status-production%20ready-success.svg)]()
+[![License](https://img.shields.io/badge/license-AGPLv3-blue.svg)]()
+[![Docker](https://img.shields.io/badge/docker-cpu%2Fgpu-orange.svg)]()
 
-**Sentiric STT**, OpenAI Whisper modelini kullanan, **C++ tabanlı**, GPU hızlandırmalı ve **Duyuşsal Zeka (Affective Intelligence)** yeteneklerine sahip yüksek performanslı bir konuşmadan yazıya mikroservisidir.
+**Sentiric STT**, OpenAI Whisper modelini kullanan, **C++ tabanlı**, GPU hızlandırmalı ve **Duyuşsal Zeka (Affective Intelligence)** yeteneklerine sahip yüksek performanslı bir konuşmadan yazıya (Speech-to-Text) motorudur.
 
-## 🚀 Özellikler (v2.5.1)
+Bu servis, **Sentiric İletişim İşletim Sistemi**'nin bir parçası olarak tasarlanmış olsa da, **tamamen bağımsız (standalone)** bir Whisper API sunucusu olarak da kullanılabilir.
 
-*   **⚡ Native Performans:** Python bağımlılığı yok. `whisper.cpp` v1.8.2 motoru ile ultra düşük gecikme.
-*   **🧠 Hibrit Mimari:** 
-    *   **VAD:** CPU (Silero VAD v5).
-    *   **Inference:** GPU (NVIDIA CUDA + Flash Attention).
-*   **🛡️ Production Ready:**
-    *   **Backpressure:** Kaynaklar dolduğunda sistemi kilitlemek yerine isteği reddeder (Fail-Fast).
-    *   **Security:** Non-root kullanıcı ile çalışır.
-*   **🎭 Zero-Latency Affective DSP:** Ek model yüklemeyen, sinyal işleme tabanlı duygu ve kimlik analizi:
-    *   **Cinsiyet Tespiti:** ZCR (Zero Crossing Rate) ve Pitch analizi ile %95+ doğruluk.
-    *   **Duygu Haritalama:** Arousal/Valence uzayında sesin enerjisine ve tınısına göre anlık duygu tahmini.
-    *   **Akıllı Diarization:** "Vector Polarization" tekniği ile konuşmacıları (Kadın/Erkek) kesin olarak ayırır.
-*   **🔄 Dynamic Batching:** Çoklu istekleri (Parallel Requests) GPU'da paralel işler.
-*   **🎛️ Omni-Studio v8.2:** Entegre Web UI ile Karaoke modu, canlı metrikler ve detaylı DSP ayarları.
+## 🚀 Neden Bu Servis? (Unique Selling Points)
+
+1.  **Saf C++ Performansı:** Python, PyTorch veya ağır frameworkler içermez. `whisper.cpp` çekirdeği sayesinde minimum RAM ve CPU ile maksimum hız (RTF) sağlar.
+2.  **Duyuşsal Zeka (Zero-Latency DSP):** Ek bir AI modeli çalıştırmadan, sinyal işleme (DSP) ile milisaniyeler içinde:
+    *   **Cinsiyet Tespiti** (Erkek/Kadın)
+    *   **Duygu Analizi** (Heyecanlı, Üzgün, Nötr, Kızgın)
+    *   **Konuşmacı Ayrıştırma** (Speaker Diarization) yapar.
+3.  **Production Grade:**
+    *   **Dynamic Batching:** GPU üzerinde aynı anda birden fazla isteği paralel işler.
+    *   **Smart VAD:** CPU tabanlı ses aktivite algılama ile GPU'yu sadece konuşma olduğunda yorar.
+    *   **Auto-Provisioning:** Gerekli modelleri açılışta otomatik indirir ve doğrular.
 
 ---
 
-## 🛠️ Hızlı Başlangıç
+## 🛠️ Kurulum ve Çalıştırma
 
-### Ön Gereksinimler
-*   Docker & Docker Compose
-*   (Opsiyonel) NVIDIA GPU & Container Toolkit
+### Seçenek 1: Docker (Önerilen)
 
-### 1. Çalıştırma (GPU)
+**GPU (NVIDIA) ile:**
 ```bash
 make up-gpu
+# Veya manuel:
+docker run -d --gpus all -p 15030:15030 -p 15031:15031 ghcr.io/sentiric/sentiric-stt-whisper-service:latest-gpu
 ```
-*Servis ilk açılışta gerekli modelleri (~1.5GB) otomatik indirir.*
 
-### 2. Test Etme (Omni-Studio)
-Tarayıcınızda **`http://localhost:15030`** adresine gidin.
+**CPU ile:**
+```bash
+make up-cpu
+# Veya manuel:
+docker run -d -p 15030:15030 -p 15031:15031 ghcr.io/sentiric/sentiric-stt-whisper-service:latest
+```
 
-### 3. API Kullanımı
+### Seçenek 2: Bağımsız Kullanım (Standalone API)
+
+Servis ayağa kalktığında, standart OpenAI Whisper API'sine benzer (ancak daha zengin) bir REST API sunar.
+
+**Örnek İstek:**
 ```bash
 curl http://localhost:15030/v1/transcribe \
-  -F "file=@audio.wav" \
-  -F "language=tr"
+  -F "file=@kayit.wav" \
+  -F "language=tr" \
+  -F "diarization=true"
+```
+
+**Örnek Yanıt (Zenginleştirilmiş):**
+```json
+{
+  "text": "Merhaba, bugün nasılsınız?",
+  "language": "tr",
+  "duration": 2.5,
+  "segments": [
+    {
+      "text": "Merhaba, bugün nasılsınız?",
+      "start": 0.0,
+      "end": 2.5,
+      "gender": "F",           // DSP ile tespit edildi
+      "emotion": "neutral",    // DSP ile tespit edildi
+      "speaker_id": "spk_0",   // Kümeleme ile atandı
+      "words": [...]
+    }
+  ]
+}
 ```
 
 ---
 
-## ⚙️ Yapılandırma (v2.5.1 Default)
+## ⚙️ Yapılandırma (Environment Variables)
+
+Servis, `.env` dosyası veya Docker ortam değişkenleri ile tamamen yönetilebilir.
 
 | Değişken | Varsayılan | Açıklama |
 | :--- | :--- | :--- |
-| `STT_WHISPER_SERVICE_MODEL_FILENAME` | `ggml-medium.bin` | Whisper modeli. (small, medium, large-v3) |
-| `STT_WHISPER_SERVICE_PARALLEL_REQUESTS` | `2` | Aynı anda işlenecek ses sayısı (GPU VRAM'e göre artırın). |
-| `STT_WHISPER_SERVICE_QUEUE_TIMEOUT_MS` | `5000` | **(YENİ)** Havuz doluysa en fazla kaç ms beklensin? |
-| `STT_WHISPER_SERVICE_ENABLE_DIARIZATION`| `true` | Konuşmacı ayrıştırma. |
-| `STT_WHISPER_SERVICE_CLUSTER_THRESHOLD` | `0.94` | **(YENİ)** Konuşmacı ayrım hassasiyeti (Düşük=Birleştirir, Yüksek=Ayırır). |
-| `STT_WHISPER_SERVICE_PITCH_GATE` | `170` | Cinsiyet ayrımı için temel frekans eşiği (Hz). |
+| `STT_WHISPER_SERVICE_MODEL_FILENAME` | `ggml-medium.bin` | Kullanılacak model boyutu (tiny, base, small, medium, large-v3). |
+| `STT_WHISPER_SERVICE_PARALLEL_REQUESTS` | `2` | GPU üzerinde aynı anda işlenecek maksimum paralel istek sayısı. |
+| `STT_WHISPER_SERVICE_ENABLE_DIARIZATION`| `true` | Konuşmacı ayrıştırma özelliğini aç/kapat. |
+| `STT_WHISPER_SERVICE_CLUSTER_THRESHOLD` | `0.94` | Konuşmacı ayrım hassasiyeti (Düşük=Birleştirir, Yüksek=Ayırır). |
 
 ---
 
-## 🏗️ Mimari
+## 🏗️ Mimari ve Entegrasyon
 
-```mermaid
-graph TD
-    Input[Audio Input] --> Resampler[Resampler 16kHz]
-    Resampler --> VAD[Silero VAD (CPU)]
-    VAD --> Queue[Request Queue (Timeout Protected)]
-    Queue --> Whisper[Whisper Encoder (GPU)]
-    
-    subgraph "DSP & Affective Engine"
-        PCM[PCM Data] --> Pitch[Pitch/ZCR Analysis]
-        Pitch --> Correction[Octave Error Correction]
-        Correction --> Gender[Gender Classification]
-        Gender --> Emotion[Relative Emotion Mapping]
-        Gender --> Vector[Vector Polarization]
-    end
-    
-    Whisper --> Tokens[Text Tokens]
-    Tokens --> JSON[Final JSON Response]
-    Vector --> JSON
-    Emotion --> JSON
-```
+*   **gRPC (Port 15031):** Yüksek performanslı iç iletişim için (`sentiric-contracts` uyumlu).
+*   **HTTP (Port 15030):** Dış dünya entegrasyonu ve Web UI için.
+*   **Metrics (Port 15032):** Prometheus uyumlu metrikler (`/metrics`).
+
+Bu proje, Sentiric ekosisteminin bir parçasıdır ancak tek başına bir mikroservis olarak dağıtılabilir ve kullanılabilir.
+
 
 ## 📜 Lisans
 AGPLv3 License.
