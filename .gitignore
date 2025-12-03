@@ -23,3 +23,4 @@ models/*.bin
 # Test verileri
 *.wav
 test_data/
+.env
