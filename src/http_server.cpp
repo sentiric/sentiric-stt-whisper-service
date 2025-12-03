@@ -26,19 +26,6 @@ MetricsServer::MetricsServer(const std::string& host, int port, prometheus::Regi
         
         res.set_content(ss.str(), "text/plain; version=0.0.4");
     });
-            
-    // YENİ: CORS Headerları eklendi. Omni-Studio (15030) buradan (15032) veri çekebilsin.
-    svr_.Get("/metrics", [this](const httplib::Request &, httplib::Response &res) {
-        prometheus::TextSerializer serializer;
-        auto collected_metrics = this->registry_.Collect();
-        std::stringstream ss; serializer.Serialize(ss, collected_metrics);
-        
-        res.set_header("Access-Control-Allow-Origin", "*"); // KRİTİK: Tarayıcı erişimi için
-        res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type");
-        
-        res.set_content(ss.str(), "text/plain; version=0.0.4");
-    });
 
     // Options isteği için de (Preflight)
     svr_.Options("/metrics", [](const httplib::Request &, httplib::Response &res) {
@@ -59,7 +46,8 @@ void HttpServer::setup_routes() {
     if (!ret) spdlog::warn("⚠️ Could not mount ./studio directory.");
     svr_.Get("/health", [this](const httplib::Request &, httplib::Response &res) {
         bool ready = engine_->is_ready();
-        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.5.0"}, {"api_compatibility", "openai-whisper"} };
+        // VERSİYON GÜNCELLENDİ: 2.5.0 -> 2.5.1
+        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.5.1"}, {"api_compatibility", "openai-whisper"} };
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(response.dump(), "application/json"); res.status = ready ? 200 : 503;
     });
