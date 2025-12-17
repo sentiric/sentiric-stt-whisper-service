@@ -1,6 +1,7 @@
 #include "stt_engine.h"
 #include "prosody_extractor.h"
 #include "speaker_cluster.h"
+#include "utils.h" // [EKLENDİ] Hallucination filtresi için gerekli
 #include "spdlog/spdlog.h"
 #include <samplerate.h>
 #include <stdexcept>
@@ -139,19 +140,12 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         }
     }
 
-    // --- RAII GUARD (KRİTİK GÜNCELLEME) ---
-    // State edinimi (acquire) constructor'da, serbest bırakma (release) destructor'da yapılır.
-    // Bu sayede exception olsa bile release garanti edilir.
     StateGuard guard(*this);
     struct whisper_state* state = guard.get(); 
 
     auto t_acquired = std::chrono::high_resolution_clock::now();
     
-    // -----------------------------------------------------------
-    // FIX: DIARIZATION THRESHOLD FROM CONFIG
-    // -----------------------------------------------------------
     SpeakerClusterer clusterer(settings_.cluster_threshold); 
-    // -----------------------------------------------------------
 
     int active_beam_size = (options.beam_size >= 0) ? options.beam_size : settings_.beam_size;
     float active_temp = (options.temperature >= 0.0f) ? options.temperature : settings_.temperature;
@@ -187,12 +181,20 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     std::vector<TranscriptionResult> results;
     
     if (ret == 0) {
-        // HATA DÜZELTMESİ: whisper_full_n_segments_from_state(state, i) -> i parametresi fazla ve hatalıydı.
         const int n_segments = whisper_full_n_segments_from_state(state);
         
         const float MIN_AVG_TOKEN_PROB = 0.40f;
         for (int i = 0; i < n_segments; ++i) {
-            const char* text = whisper_full_get_segment_text_from_state(state, i);
+            const char* text_c = whisper_full_get_segment_text_from_state(state, i);
+            std::string text = text_c ? std::string(text_c) : "";
+
+            // [YENİ] HALLUCINATION CHECK
+            // Eğer metin "yasaklı" ise veya sessizlik halüsinasyonu ise atla.
+            if (sentiric::utils::is_hallucination(text)) {
+                spdlog::warn("🚫 Hallucination filtered: '{}'", text);
+                continue;
+            }            
+            
             const int64_t t0 = whisper_full_get_segment_t0_from_state(state, i);
             const int64_t t1 = whisper_full_get_segment_t1_from_state(state, i);
             bool speaker_turn_next = whisper_full_get_segment_speaker_turn_next_from_state(state, i);
@@ -231,7 +233,7 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
                 }
             }
 
-            results.push_back({ std::string(text), target_lang, avg_prob, t0, t1, speaker_turn_next, tokens,
+            results.push_back({ text, target_lang, avg_prob, t0, t1, speaker_turn_next, tokens,
                                 valid_token_count,
                                 pros.gender_proxy, pros.emotion_proxy, pros.arousal, pros.valence, pros, spk_id });
         }
@@ -240,6 +242,5 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
         else spdlog::error("Whisper processing failed: {}", ret); 
     }
     
-    // StateGuard destructor will automatically call release_state(state).
     return results;
 }

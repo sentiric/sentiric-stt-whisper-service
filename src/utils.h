@@ -159,4 +159,38 @@ namespace sentiric::utils {
         result.is_valid = true;
         return result;
     }
+
+    // --- YENİ EKLENEN: Hallucination Filter (Studio'dan Port Edildi) ---
+    inline bool is_hallucination(const std::string& text) {
+        if (text.empty()) return true;
+        
+        // 1. Çok kısa ve anlamsız metinler
+        if (text.length() < 2) return true;
+        
+        // 2. Sadece noktalama işaretleri
+        if (text.find_first_not_of(" \t\n\v\f\r.,?!") == std::string::npos) return true;
+
+        // 3. Köşeli parantezli ses efektleri [Music], [Applause]
+        if (text.front() == '[' && text.back() == ']') return true;
+        if (text.front() == '(' && text.back() == ')') return true;
+
+        // 4. Yasaklı Kelime Listesi (Whisper Hallucinations)
+        static const std::vector<std::string> banned = {
+            "altyazı", "sesli betimleme", "senkron", "www.", ".com",
+            "izlediğiniz için", "teşekkürler", "thank you", "thanks for watching",
+            "abone ol", "videoyu beğen", "bir sonraki videoda",
+            "devam edecek", "transcription:", "subtitle:",
+            "2分", "ご視聴", // Japonca halüsinasyonlar
+            "I'm going to go", "Okay.", "Bye."
+        };
+
+        std::string lower = text;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+        for (const auto& phrase : banned) {
+            if (lower.find(phrase) != std::string::npos) return true;
+        }
+
+        return false;
+    }    
 }
