@@ -33,16 +33,26 @@ class SystemMonitor {
         this.history = new Array(50).fill(0);
         this.lastTokens = 0;
         this.lastCheck = Date.now();
+        this.failCount = 0; // Backoff mekanizması için
         if (this.ctx) { this.resize(); this.startPolling(); }
     }
     resize() { if(this.canvas) { this.canvas.width = this.canvas.parentElement.offsetWidth; this.canvas.height = 60; } }
     async startPolling() {
         setInterval(async () => {
+            // Eğer sürekli hata alıyorsak (CORS vb.) polling'i yavaşlat veya durdur
+            if (this.failCount > 10) return; 
+
             try {
-                const r = await fetch('http://localhost:15032/metrics');
+                // Fetch modunu cors olarak belirttik ve hata yakalamayı iyileştirdik
+                const r = await fetch(`${window.location.protocol}//${document.domain}:15032/metrics`, { mode: 'cors' });
+                if (!r.ok) throw new Error("Metrics endpoint unavailable");
                 const text = await r.text();
                 this.parseAndRender(text);
-            } catch (e) { }
+                this.failCount = 0; // Başarılıysa sayacı sıfırla
+            } catch (e) { 
+                this.failCount++;
+                if (this.failCount === 1) console.warn("Metrics Monitor Connection Lost (Check CORS/Port 15032)");
+            }
         }, 1000);
     }
     parseAndRender(text) {
@@ -117,7 +127,7 @@ class SpeakerSystem {
 const Speaker = new SpeakerSystem();
 
 // =============================================================================
-// 🎹 AUDIO ENGINE
+// 🎹 AUDIO ENGINE (CRITICAL FIX APPLIED)
 // =============================================================================
 const AudioSys = {
     ctx: null, analyser: null, script: null, 
@@ -125,15 +135,43 @@ const AudioSys = {
     wakeLock: null, vadThreshold: 0.02, vadPauseTime: 1500,
 
     async init() {
-        if(this.ctx) return;
-        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const src = this.ctx.createMediaStreamSource(stream);
-        this.analyser = this.ctx.createAnalyser(); this.analyser.fftSize = 256; 
-        this.script = this.ctx.createScriptProcessor(4096, 1, 1);
-        src.connect(this.analyser); this.analyser.connect(this.script); this.script.connect(this.ctx.destination);
-        this.script.onaudioprocess = e => this.process(e);
-        UI.startViz();
+        if(this.ctx) return true;
+
+        // 🛡️ SECURITY CHECK: Tarayıcı mikrofonu engelliyor mu?
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            const isHttps = location.protocol === 'https:';
+            
+            let errorMsg = "Tarayıcınız ses cihazlarına erişimi desteklemiyor.";
+            
+            if (!isHttps && !isLocal) {
+                errorMsg = "🛑 GÜVENLİK HATASI: Mikrofon erişimi için site HTTPS üzerinden çalışmalıdır! Şu an HTTP kullanıyorsunuz.";
+                console.error("AudioSys Security:", "getUserMedia is blocked on non-secure (HTTP) contexts.");
+                UI.showToast(errorMsg);
+                alert(errorMsg + "\n\nLütfen adres satırına 'https://' yazarak girmeyi deneyin (sunucu destekliyorsa) veya localhost kullanın.");
+                return false;
+            }
+        }
+
+        try {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const src = this.ctx.createMediaStreamSource(stream);
+            this.analyser = this.ctx.createAnalyser(); this.analyser.fftSize = 256; 
+            this.script = this.ctx.createScriptProcessor(4096, 1, 1);
+            src.connect(this.analyser); this.analyser.connect(this.script); this.script.connect(this.ctx.destination);
+            this.script.onaudioprocess = e => this.process(e);
+            UI.startViz();
+            return true;
+        } catch (e) {
+            console.error("Microphone Init Failed:", e);
+            if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+                UI.showToast("🛑 Mikrofon izni reddedildi. Lütfen tarayıcı ayarlarından izin verin.");
+            } else {
+                UI.showToast("❌ Mikrofon başlatılamadı: " + e.message);
+            }
+            return false;
+        }
     },
     async requestWakeLock() { try { if(navigator.wakeLock) this.wakeLock = await navigator.wakeLock.request('screen'); } catch(e){} },
     releaseWakeLock() { if(this.wakeLock) { this.wakeLock.release(); this.wakeLock = null; } },
@@ -173,9 +211,7 @@ const ViewModes = { heatmap: false, karaoke: true };
 // 🎨 UI CONTROLLER
 // =============================================================================
 const UI = {
-    // YENİ: Tüm konuşma geçmişini tutacak bellek
     conversationHistory: [],
-    // Sürekli artan zaman ofseti (her yeni kayıt bir öncekinin sonuna eklenir)
     globalTimeOffset: 0.0,
 
     init() {
@@ -204,6 +240,11 @@ const UI = {
         document.onkeydown = e => { if(e.code=='Space' && e.target.tagName!='TEXTAREA' && e.target.tagName!='INPUT') { e.preventDefault(); this.toggleRec(); } };
         
         if(!$('#promptInput').value) this.setTemplate('general');
+        
+        // Initial Check Warning
+        if(location.protocol !== 'https:' && location.hostname !== 'localhost') {
+            this.showToast("⚠️ DİKKAT: Güvenli olmayan bağlantı (HTTP). Mikrofon çalışmayabilir.");
+        }
     },
 
     setTemplate(key) {
@@ -232,8 +273,10 @@ const UI = {
     toggleAcc(id) { $(`#${id}`).classList.toggle('active'); },
     resetSettings() { localStorage.clear(); location.reload(); },
 
-    toggleRec() {
-        if(!AudioSys.ctx) AudioSys.init();
+    async toggleRec() {
+        const initialized = await AudioSys.init();
+        if(!initialized) return; // Init fail ettiyse başlama
+
         if(AudioSys.isRec) {
             AudioSys.isRec = false; clearInterval(AudioSys.timer); AudioSys.releaseWakeLock(); AudioSys.haptic([50, 50]);
             $('#recordBtn').classList.remove('recording'); $('#recordTimer').classList.remove('active');
@@ -249,11 +292,14 @@ const UI = {
         }
     },
 
-    toggleVad() {
+    async toggleVad() {
+        const initialized = await AudioSys.init();
+        if(!initialized) return;
+
         AudioSys.handsFree = !AudioSys.handsFree; const btn = $('#vadBtn');
         if (AudioSys.handsFree) {
             btn.classList.add('active'); btn.innerHTML = '<div class="active-dot"></div><i class="fas fa-wave-square"></i>';
-            AudioSys.haptic([50]); if(!AudioSys.ctx) AudioSys.init();
+            AudioSys.haptic([50]);
         } else {
             btn.classList.remove('active'); btn.innerHTML = '<div class="active-dot" style="display:none"></div><i class="fas fa-robot"></i>';
             AudioSys.haptic([20]);
@@ -304,8 +350,6 @@ const UI = {
 
             const spk = Speaker.identify(seg.speaker_vec, {gender: seg.gender});
             
-            // YENİ: Global Geçmişe Ekle (Zaman kayması ile)
-            // Her bir segmenti belleğe atıyoruz
             this.conversationHistory.push({
                 speaker_name: spk.name,
                 speaker_id: spk.id,
@@ -357,7 +401,6 @@ const UI = {
         
         batchHtml += `</div>`; 
         
-        // Global zamanı ilerlet (Duration milisaniye geliyor, saniyeye çevirip ekle)
         if(renderedCount > 0) {
              this.globalTimeOffset += (data.duration || 0);
         }
@@ -420,25 +463,20 @@ const UI = {
         $('#rtfVal').innerText = data.meta?.rtf ? (1/data.meta.rtf).toFixed(1) + 'x' : '0.0x';
         $('#durVal').innerText = (dur/1000).toFixed(2)+'s'; $('#procVal').innerText = (proc/1000).toFixed(2)+'s';
         $('#tokenVal').innerText = data.meta?.tokens || 0;
-        // JSON panelini de artık geçmişle güncelle
         $('#jsonOutput').innerText = JSON.stringify(this.conversationHistory, null, 2);
     },
     
-    // GÜNCELLENDİ: Artık global history'den export alıyor
     export(t) {
         if (this.conversationHistory.length === 0) {
             this.showToast("⚠️ Dışa aktarılacak veri yok.");
             return;
         }
-
         let content = "";
-        
         if (t === 'json') {
             content = JSON.stringify(this.conversationHistory, null, 2);
         } 
         else if (t === 'txt') {
             this.conversationHistory.forEach(s => {
-                // [00:12.5] Konuşmacı A: Merhaba
                 const min = Math.floor(s.start_time / 60);
                 const sec = (s.start_time % 60).toFixed(1);
                 const ts = `${String(min).padStart(2,'0')}:${String(sec).padStart(4,'0')}`;
@@ -453,12 +491,10 @@ const UI = {
                 const ms = Math.floor((sec%1)*1000);
                 return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')},${String(ms).padStart(3,'0')}`;
             };
-            
             this.conversationHistory.forEach((s, i) => {
                 content += `${i+1}\n${fmt(s.start_time)} --> ${fmt(s.end_time)}\n[${s.speaker_name}]: ${s.text}\n\n`;
             });
         }
-        
         const a = document.createElement('a'); 
         a.href = URL.createObjectURL(new Blob([content], {type: 'text/plain'})); 
         a.download = `transcript_full.${t}`; 
@@ -466,7 +502,8 @@ const UI = {
     },
 
     startViz() {
-        const cv = $('#audioVisualizer'); const ctx = cv.getContext('2d');
+        const cv = $('#audioVisualizer'); if (!cv) return;
+        const ctx = cv.getContext('2d');
         const rsz = () => { cv.width = cv.parentElement.offsetWidth; cv.height = cv.parentElement.offsetHeight; };
         window.onresize = rsz; rsz(); const arr = new Uint8Array(AudioSys.analyser.frequencyBinCount);
         const loop = () => {
@@ -480,7 +517,6 @@ const UI = {
     clear() { 
         $('#transcriptFeed').innerHTML = '<div class="empty-placeholder"><div class="placeholder-icon"><i class="fas fa-microphone-lines"></i></div><h3>Temizlendi</h3></div>'; 
         Speaker.reset(); 
-        // Geçmişi temizle
         this.conversationHistory = [];
         this.globalTimeOffset = 0.0;
         $('#jsonOutput').innerText = "Veri yok...";
