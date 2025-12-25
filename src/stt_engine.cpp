@@ -1,7 +1,7 @@
 #include "stt_engine.h"
 #include "prosody_extractor.h"
 #include "speaker_cluster.h"
-#include "utils.h" // [EKLENDİ] Hallucination filtresi için gerekli
+#include "utils.h" 
 #include "spdlog/spdlog.h"
 #include <samplerate.h>
 #include <stdexcept>
@@ -94,6 +94,9 @@ std::vector<float> SttEngine::resample_audio(const float* input, size_t input_si
 bool SttEngine::is_speech_detected(const float* pcm, size_t n_samples) {
     if (!vad_ctx_) return true;
     std::lock_guard<std::mutex> lock(vad_mutex_);
+    // VAD threshold config'den alınmalı (Whisper VAD API destekliyorsa)
+    // Şimdilik Whisper.cpp VAD API threshold'u parametre olarak almıyor, internal defaults kullanıyor olabilir
+    // Ancak wrapper seviyesinde pre-check yapıyoruz.
     return whisper_vad_detect_speech(vad_ctx_, pcm, static_cast<int>(n_samples));
 }
 
@@ -129,16 +132,40 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     
     ProsodyOptions p_opts = options.prosody_opts; 
 
-    if (settings_.enable_vad && pcm_size > (16000 * 0.2)) {
+    // [DÜZELTME BAŞLANGIÇ]
+    // Eski Kod: if (settings_.enable_vad && pcm_size > (16000 * 0.2)) {
+    // Açıklama: 0.2 hardcoded değer kaldırıldı. Config'den gelen ms değeri kullanılıyor.
+    size_t min_vad_samples = static_cast<size_t>((settings_.vad_ms_min_duration * 16000) / 1000);
+    
+    // Eğer ses config'deki min süreden kısaysa hiç işleme (Gürültü/Click)
+    if (pcm_size < min_vad_samples) {
+        spdlog::debug("Audio snippet too short for processing ({:.2f}ms < {}ms). Dropped.", 
+                      (double)pcm_size/16.0, settings_.vad_ms_min_duration);
+        if (out_metrics) { out_metrics->queue_time_ms = 0; out_metrics->processing_time_ms = 0; out_metrics->token_count = 0; }
+        return {}; // Boş dön, halüsinasyonu engelle
+    }
+
+    if (settings_.enable_vad) {
         if (!is_speech_detected(pcm_ptr, pcm_size)) {
+            // Sessizlik tespit edildi, Whisper'ı hiç yorma.
+            // Sadece boş Affective data dön (UI'da hata olmaması için)
             TranscriptionResult empty_res; empty_res.text = ""; empty_res.language = "unknown"; empty_res.prob = 0.0f;
             empty_res.t0 = 0; empty_res.t1 = static_cast<int64_t>(pcm_size / 16.0); empty_res.speaker_turn_next = false;
             empty_res.token_count = 0;
             empty_res.affective = extract_prosody(nullptr, 0, 16000, p_opts); 
             empty_res.speaker_id = "unknown";
+            
+            if (out_metrics) {
+                auto t_now = std::chrono::high_resolution_clock::now();
+                out_metrics->queue_time_ms = 0; 
+                out_metrics->processing_time_ms = std::chrono::duration<double, std::milli>(t_now - t_start).count();
+                out_metrics->token_count = 0;
+            }
+            
             return {empty_res};
         }
     }
+    // [DÜZELTME BİTİŞ]
 
     StateGuard guard(*this);
     struct whisper_state* state = guard.get(); 
@@ -166,7 +193,11 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     wparams.temperature = active_temp;
     if (strategy == WHISPER_SAMPLING_BEAM_SEARCH) wparams.beam_search.beam_size = active_beam_size;
     else wparams.greedy.best_of = active_best_of;
-    wparams.entropy_thold = 2.40f; wparams.logprob_thold = settings_.logprob_threshold; wparams.n_threads = settings_.n_threads;
+    
+    // Gelişmiş Hallucination Parametreleri
+    wparams.entropy_thold = 2.40f; 
+    wparams.logprob_thold = settings_.logprob_threshold; 
+    wparams.n_threads = settings_.n_threads;
     
     int ret = whisper_full_with_state(ctx_, state, wparams, pcm_ptr, static_cast<int>(pcm_size));
     
@@ -183,15 +214,16 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
     if (ret == 0) {
         const int n_segments = whisper_full_n_segments_from_state(state);
         
+        // Halüsinasyon için 2. Filtre: Düşük olasılıklı tokenler
         const float MIN_AVG_TOKEN_PROB = 0.40f;
+        
         for (int i = 0; i < n_segments; ++i) {
             const char* text_c = whisper_full_get_segment_text_from_state(state, i);
             std::string text = text_c ? std::string(text_c) : "";
 
-            // [YENİ] HALLUCINATION CHECK
-            // Eğer metin "yasaklı" ise veya sessizlik halüsinasyonu ise atla.
+            // [GÜVENLİK] Yasaklı kelimeleri ve kısa anlamsız sesleri (Pffft, Hıhı) filtrele
             if (sentiric::utils::is_hallucination(text)) {
-                spdlog::warn("🚫 Hallucination filtered: '{}'", text);
+                spdlog::warn("🚫 Hallucination filtered (utils): '{}'", text);
                 continue;
             }            
             
@@ -213,7 +245,12 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
             if (out_metrics) out_metrics->token_count += valid_token_count;
 
             float avg_prob = (valid_token_count > 0) ? static_cast<float>(total_prob / valid_token_count) : 0.0f;
-            if (avg_prob < MIN_AVG_TOKEN_PROB && valid_token_count > 0) continue;
+            
+            // Eğer model emin değilse (%40 altı) sessiz kalması daha iyidir.
+            if (avg_prob < MIN_AVG_TOKEN_PROB && valid_token_count > 0) {
+                 spdlog::warn("🚫 Hallucination filtered (low probability {:.2f}): '{}'", avg_prob, text);
+                 continue;
+            }
 
             int64_t sample_start = static_cast<int64_t>((static_cast<double>(t0) / 100.0) * 16000.0);
             int64_t sample_end   = static_cast<int64_t>((static_cast<double>(t1) / 100.0) * 16000.0);

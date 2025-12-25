@@ -18,12 +18,17 @@ struct Settings {
     std::string model_url_template = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin";
     int model_load_timeout = 600;
 
-    // --- VAD Settings ---
+    // --- VAD Settings (HARDENED DEFAULTS) ---
     std::string vad_model_filename = "ggml-silero-vad.bin"; 
     std::string vad_model_url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin";
     
     bool enable_vad = true;
-    float vad_threshold = 0.5f;        
+    
+    // GÜNCELLEME: Varsayılan olarak sıkı mod (0.5 -> 0.75)
+    // .env olmasa bile gürültüye karşı korumalı.
+    float vad_threshold = 0.75f;        
+    
+    // GÜNCELLEME: En az yarım saniye konuşma gerekli (Click/Pop seslerini eler)
     int vad_ms_min_duration = 500;     
     
     // --- Performance & Batching ---
@@ -43,9 +48,13 @@ struct Settings {
     float temperature = 0.0f;
     int best_of = 5;
     
-    // GÜNCELLEME: Halüsinasyonları engellemek için daha agresif varsayılanlar
-    float logprob_threshold = -0.8f; // Eskisi: -1.0
-    float no_speech_threshold = 0.9f; // Eskisi: 0.6 (Kritik Düzeltme)
+    // GÜNCELLEME: Halüsinasyonları engellemek için agresif varsayılanlar
+    // Logprob ne kadar yüksekse (sıfıra yakın), model o kadar emin demektir.
+    // -1.0 çok gevşekti, -0.7 yaparak "Emin değilsen sus" diyoruz.
+    float logprob_threshold = -0.7f; 
+    
+    // Sessizlik olasılığı %85'in üzerindeyse işlemeyi durdur.
+    float no_speech_threshold = 0.85f; 
     
     bool flash_attn = true;
     bool suppress_nst = true; 
@@ -91,10 +100,13 @@ inline Settings load_settings() {
     std::string size = get_env("STT_WHISPER_SERVICE_MODEL_SIZE", "medium");
     s.model_filename = get_env("STT_WHISPER_SERVICE_MODEL_FILENAME", "ggml-" + size + ".bin");
     
-    s.vad_model_filename = get_env("STT_WHISPER_SERVICE_VAD_MODEL", "ggml-silero-vad.bin");
+    s.vad_model_filename = get_env("STT_WHISPER_SERVICE_VAD_MODEL", s.vad_model_filename);
     s.vad_model_url = get_env("STT_WHISPER_SERVICE_VAD_URL", s.vad_model_url);
     s.enable_vad = get_bool("STT_WHISPER_SERVICE_ENABLE_VAD", s.enable_vad);
+    
+    // Env varsa onu al, yoksa yukarıdaki güncellenmiş varsayılanı kullan
     s.vad_threshold = get_float("STT_WHISPER_SERVICE_VAD_THRESHOLD", s.vad_threshold);
+    s.vad_ms_min_duration = get_int("STT_WHISPER_SERVICE_VAD_MS_MIN_DURATION", s.vad_ms_min_duration);
     
     s.flash_attn = get_bool("STT_WHISPER_SERVICE_FLASH_ATTN", s.flash_attn);
     s.suppress_nst = get_bool("STT_WHISPER_SERVICE_SUPPRESS_NST", s.suppress_nst);
@@ -113,7 +125,6 @@ inline Settings load_settings() {
     s.temperature = get_float("STT_WHISPER_SERVICE_TEMPERATURE", s.temperature);
     s.best_of = get_int("STT_WHISPER_SERVICE_BEST_OF", s.best_of);
     
-    // Config'den de okunabilir olsun
     s.logprob_threshold = get_float("STT_WHISPER_SERVICE_LOGPROB_THRESHOLD", s.logprob_threshold);
     s.no_speech_threshold = get_float("STT_WHISPER_SERVICE_NO_SPEECH_THRESHOLD", s.no_speech_threshold);
 

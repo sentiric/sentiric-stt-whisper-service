@@ -23,17 +23,12 @@ namespace sentiric::utils {
         bool is_valid = false;
     };
 
-    // --- YENİ EKLENEN FONKSİYON: FFmpeg ile MP3/WebM -> WAV PCM Dönüştürme ---
-    // Bu versiyon popen yerine daha güvenli olan dosya tabanlı dönüşümü kullanır.
     inline std::vector<int16_t> decode_with_ffmpeg(const std::string& input_data) {
         std::vector<int16_t> output;
-        
-        // Rastgele dosya ismi oluştur (Thread-safety için basit random)
         int rand_id = std::rand();
         std::string temp_in = "/tmp/stt_in_" + std::to_string(rand_id) + ".bin";
         std::string temp_out = "/tmp/stt_out_" + std::to_string(rand_id) + ".raw";
         
-        // 1. Gelen veriyi (MP3/WebM) diske yaz
         std::ofstream outfile(temp_in, std::ios::binary);
         if (!outfile.is_open()) {
             spdlog::error("Temp file write failed: {}", temp_in);
@@ -42,25 +37,16 @@ namespace sentiric::utils {
         outfile.write(input_data.data(), input_data.size());
         outfile.close();
         
-        // 2. FFmpeg ile dönüştür (Sessiz modda)
-        // -y: Üzerine yaz
-        // -f s16le -acodec pcm_s16le: Ham 16-bit PCM çıktısı
-        // -ac 1: Mono
-        // -ar 16000: 16kHz
         std::string cmd = "ffmpeg -y -hide_banner -loglevel error -i " + temp_in + " -f s16le -acodec pcm_s16le -ac 1 -ar 16000 " + temp_out;
-        
         int ret = std::system(cmd.c_str());
         
         if (ret == 0) {
-            // 3. Dönüştürülen Raw PCM verisini oku
             std::ifstream infile(temp_out, std::ios::binary | std::ios::ate);
             if (infile.is_open()) {
                 std::streamsize size = infile.tellg();
                 infile.seekg(0, std::ios::beg);
-                
-                // Boyut kontrolü (Çok küçükse hata olabilir)
                 if (size > 0) {
-                    output.resize(size / 2); // 16-bit = 2 byte
+                    output.resize(size / 2); 
                     infile.read(reinterpret_cast<char*>(output.data()), size);
                     spdlog::info("FFmpeg conversion success: {} bytes -> {} samples", size, output.size());
                 }
@@ -68,14 +54,10 @@ namespace sentiric::utils {
         } else {
             spdlog::error("FFmpeg conversion failed with return code: {}", ret);
         }
-        
-        // 4. Temizlik (Her durumda sil)
         std::remove(temp_in.c_str());
         std::remove(temp_out.c_str());
-        
         return output;
     }
-    // -----------------------------------------------------------------------
 
     inline std::string clean_utf8(const std::string& str) {
         std::string res; res.reserve(str.size()); size_t i = 0;
@@ -92,12 +74,9 @@ namespace sentiric::utils {
         DecodedAudio result;
         result.is_valid = false;
 
-        // WAV Header yoksa (Muhtemelen MP3, WebM veya Raw PCM)
         if (!has_wav_header(bytes)) {
-            
             spdlog::info("No WAV header found. Attempting FFmpeg conversion...");
             std::vector<int16_t> converted = decode_with_ffmpeg(bytes);
-            
             if (!converted.empty()) {
                 result.pcm_data = std::move(converted);
                 result.sample_rate = 16000;
@@ -105,8 +84,6 @@ namespace sentiric::utils {
                 result.is_valid = true;
                 return result;
             }
-
-            // FFmpeg başarısız olursa eski usül Raw PCM varsay (Fallback)
             spdlog::warn("FFmpeg conversion returned empty. Falling back to Raw PCM assumption.");
             if (bytes.size() % 2 != 0) {
                  spdlog::warn("Raw PCM data size is odd ({}), truncating last byte.", bytes.size());
@@ -122,7 +99,6 @@ namespace sentiric::utils {
             return result;
         }
 
-        // WAV Parsing (Değişmedi)
         const uint8_t* data = reinterpret_cast<const uint8_t*>(bytes.data());
         size_t ptr = 12;
         const uint8_t* pcm_start = nullptr;
@@ -160,7 +136,6 @@ namespace sentiric::utils {
         return result;
     }
 
-    // --- YENİ EKLENEN: Hallucination Filter (Studio'dan Port Edildi) ---
     inline bool is_hallucination(const std::string& text) {
         if (text.empty()) return true;
         
@@ -170,25 +145,44 @@ namespace sentiric::utils {
         // 2. Sadece noktalama işaretleri
         if (text.find_first_not_of(" \t\n\v\f\r.,?!") == std::string::npos) return true;
 
-        // 3. Köşeli parantezli ses efektleri [Music], [Applause]
+        // 3. Köşeli parantezli ses efektleri
         if (text.front() == '[' && text.back() == ']') return true;
         if (text.front() == '(' && text.back() == ')') return true;
 
-        // 4. Yasaklı Kelime Listesi (Whisper Hallucinations)
+        // 4. Yasaklı Kelime Listesi (Whisper Hallucinations & Noise Artifacts)
         static const std::vector<std::string> banned = {
             "altyazı", "sesli betimleme", "senkron", "www.", ".com",
             "izlediğiniz için", "teşekkürler", "thank you", "thanks for watching",
             "abone ol", "videoyu beğen", "bir sonraki videoda",
             "devam edecek", "transcription:", "subtitle:",
-            "2分", "ご視聴", // Japonca halüsinasyonlar
-            "I'm going to go", "Okay.", "Bye."
+            "2分", "ご視聴", 
+            "I'm going to go", "Okay.", "Bye.",
+            // [EKLENEN] Gürültüden kaynaklı sık uydurmalar
+            "Hıhı", "Pffft", "Ehem", "Hmm", "Aa", "Ah", "Oh", "Eh" 
         };
 
         std::string lower = text;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
 
+        // Tam eşleşme kontrolü (Kısa kelimeler için)
+        // Örneğin "Ah" kelimesi normal bir cümlenin içinde geçebilir ("Ahmet geldi"),
+        // ama tek başına "Ah." ise halüsinasyondur.
+        
+        // Önce "contains" kontrolü (Uzunlar için)
         for (const auto& phrase : banned) {
-            if (lower.find(phrase) != std::string::npos) return true;
+            if (phrase.length() > 4 && lower.find(phrase) != std::string::npos) return true;
+        }
+        
+        // Sonra "exact match" veya "stripped match" kontrolü (Kısalar için)
+        std::string stripped = lower;
+        // Sondaki noktalamayı sil
+        while (!stripped.empty() && ispunct(stripped.back())) stripped.pop_back();
+        while (!stripped.empty() && ispunct(stripped.front())) stripped.erase(0, 1);
+        
+        for (const auto& phrase : banned) {
+            std::string phrase_lower = phrase;
+            std::transform(phrase_lower.begin(), phrase_lower.end(), phrase_lower.begin(), ::tolower);
+            if (phrase.length() <= 4 && stripped == phrase_lower) return true;
         }
 
         return false;
