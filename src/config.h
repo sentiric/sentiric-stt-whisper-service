@@ -129,7 +129,7 @@ inline Settings load_settings() {
     s.no_speech_threshold = get_float("STT_WHISPER_SERVICE_NO_SPEECH_THRESHOLD", s.no_speech_threshold);
 
     s.log_level = get_env("STT_WHISPER_SERVICE_LOG_LEVEL", s.log_level);
-    s.grpc_ca_path = get_env("STT_WHISPER_SERVICE_CA_PATH", s.grpc_ca_path);
+    s.grpc_ca_path = get_env("GRPC_TLS_CA_PATH", s.grpc_ca_path);
     s.grpc_cert_path = get_env("STT_WHISPER_SERVICE_CERT_PATH", s.grpc_cert_path);
     s.grpc_key_path = get_env("STT_WHISPER_SERVICE_KEY_PATH", s.grpc_key_path);
 

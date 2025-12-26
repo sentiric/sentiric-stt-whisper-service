@@ -31,6 +31,10 @@ services:
     volumes:
       - "${CERTIFICATES_REPO_PATH}:/sentiric-certificates:ro"
       - stt-whisper-models:/models
+    environment:
+      - GRPC_TLS_CA_PATH=/sentiric-certificates/certs/ca.crt      
+      - STT_WHISPER_SERVICE_CERT_PATH=/sentiric-certificates/certs/stt-whisper-service.crt
+      - STT_WHISPER_SERVICE_KEY_PATH=/sentiric-certificates/certs/stt-whisper-service.key
     ports:
       - "${STT_WHISPER_SERVICE_HTTP_PORT:-15030}:${STT_WHISPER_SERVICE_HTTP_PORT:-15030}"
       - "${STT_WHISPER_SERVICE_GRPC_PORT:-15031}:${STT_WHISPER_SERVICE_GRPC_PORT:-15031}"
