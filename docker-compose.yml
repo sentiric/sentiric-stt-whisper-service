@@ -1,9 +1,29 @@
 name: sentiric
 
+# =============================================================
+# ŞABLONLAR (TEMPLATES)
+# Tekrarlanan kodları burada bir kez tanımlıyoruz.
+# =============================================================
+x-ai-service-template: &ai-service-template
+  restart: always
+  # GPU Ayarları hepsinde aynı
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [ gpu, compute, utility ]
+  healthcheck:
+    interval: 30s
+    timeout: 10s
+    retries: 10
+    start_period: 60m
+
 networks:
   sentiric-net:
-    name: "${NETWORK_NAME:-sentiric.cloud}"
     driver: bridge
+    name: sentiric-net
     ipam:
       config:
         - subnet: ${NETWORK_SUBNET:-10.88.0.0/16}
@@ -28,11 +48,27 @@ services:
   # =============================================================
 
   stt-whisper-service:
+    <<: *ai-service-template
+    image: ghcr.io/sentiric/sentiric-stt-whisper-service:latest-gpu
     volumes:
-      - "${CERTIFICATES_REPO_PATH}:/sentiric-certificates:ro"
+      - "${CERTIFICATES_REPO_PATH:-../sentiric-certificates}:/sentiric-certificates:ro"
       - stt-whisper-models:/models
     environment:
-      - GRPC_TLS_CA_PATH=/sentiric-certificates/certs/ca.crt      
+      # --- Ağ Ayarları ---
+      - STT_WHISPER_SERVICE_HOST=stt-whisper-service
+      - STT_WHISPER_SERVICE_LISTEN_ADDRESS=0.0.0.0
+      - STT_WHISPER_SERVICE_HTTP_PORT=15030
+      - STT_WHISPER_SERVICE_GRPC_PORT=15031
+      - STT_WHISPER_SERVICE_METRICS_PORT=15032
+
+      # --- GPU & Performans ---
+      - STT_WHISPER_SERVICE_DEVICE=cuda
+      - STT_WHISPER_SERVICE_COMPUTE_TYPE=float16
+      - STT_WHISPER_SERVICE_FLASH_ATTN=true
+      - STT_WHISPER_SERVICE_PARALLEL_REQUESTS=2
+
+      # --- Güvenlik (mTLS Server) ---
+      - GRPC_TLS_CA_PATH=/sentiric-certificates/certs/ca.crt
       - STT_WHISPER_SERVICE_CERT_PATH=/sentiric-certificates/certs/stt-whisper-service.crt
       - STT_WHISPER_SERVICE_KEY_PATH=/sentiric-certificates/certs/stt-whisper-service.key
     ports:
@@ -41,17 +77,10 @@ services:
       - "${STT_WHISPER_SERVICE_METRICS_PORT:-15032}:${STT_WHISPER_SERVICE_METRICS_PORT:-15032}"                
     networks:
       sentiric-net:
-        ipv4_address: ${STT_WHISPER_SERVICE_IPV4_ADDRESS:-10.88.50.3}
-    dns:
-      - ${DISCOVERY_SERVICE_IPV4_ADDRESS:-10.88.5.1}
-      - ${PRIMARY_DNS:-8.8.8.8}
-      - ${SECONDARY_DNS:-1.1.1.1}       
-    dns_search:
-      - ${DISCOVERY_DNS_SEARCH_DOMAIN}
-    restart: always
+        ipv4_address: 10.88.50.3
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${STT_WHISPER_SERVICE_HTTP_PORT:-15030}/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:15030/health" ]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 10m # Modelin yüklenmesi uzun sürebilir
+      retries: 5
+      start_period: 2m

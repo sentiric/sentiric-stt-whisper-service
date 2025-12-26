@@ -9,7 +9,22 @@ endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Güvenlik ve Uyumluluk Bayrakları
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Wno-unused-function")
+
+# --- MİMARİ DÜZELTME: PORTABILITY FIX (Exit Code 132 Prevention) ---
+# Varsayılan olarak whisper.cpp "-march=native" kullanır. Bu, imajın derlendiği
+# makine ile çalıştığı makine farklıysa (örn: CI vs Eski Desktop) SIGILL hatasına yol açar.
+# Bunu engellemek için NATIVE optimizasyonu kapatıyoruz.
+set(GGML_NATIVE OFF CACHE BOOL "Disable native instruction set optimization for portability" FORCE)
+
+# Eğer MSVC değilse (Linux/GCC), generic x86-64 seviyesini belirleyebiliriz.
+# Ancak GGML_NATIVE=OFF yeterlidir, cmake varsayılanları kullanır.
+if(NOT MSVC)
+    # Opsiyonel: Daha geniş uyumluluk için.
+    # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=x86-64 -mtune=generic")
+endif()
+# -------------------------------------------------------------------
 
 # --- Bağımlılıklar (vcpkg) ---
 find_package(gRPC CONFIG REQUIRED)
@@ -92,9 +107,8 @@ add_executable(stt_service
     src/model_manager.cpp
     src/grpc_server.cpp
     src/http_server.cpp
-    # src/utils.h header only olduğu için buraya eklemeye gerek yok ama IDE için iyi olur
-    src/prosody_extractor.cpp   # <-- yeni
-    src/speaker_cluster.cpp   # <-- yeni
+    src/prosody_extractor.cpp
+    src/speaker_cluster.cpp
 )
 add_dependencies(stt_service proto_lib)
 
