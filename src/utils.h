@@ -153,6 +153,7 @@ namespace sentiric::utils {
         static const std::vector<std::string> banned = {
             "altyazı", "sesli betimleme", "senkron", "www.", ".com",
             "izlediğiniz için", "teşekkürler", "thank you", "thanks for watching",
+            "İzlediğiniz için teşekkür ederim."
             "abone ol", "videoyu beğen", "bir sonraki videoda",
             "devam edecek", "transcription:", "subtitle:",
             "2分", "ご視聴", 
