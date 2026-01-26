@@ -12,19 +12,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Güvenlik ve Uyumluluk Bayrakları
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Wno-unused-function")
 
-# --- MİMARİ DÜZELTME: PORTABILITY FIX (Exit Code 132 Prevention) ---
-# Varsayılan olarak whisper.cpp "-march=native" kullanır. Bu, imajın derlendiği
-# makine ile çalıştığı makine farklıysa (örn: CI vs Eski Desktop) SIGILL hatasına yol açar.
-# Bunu engellemek için NATIVE optimizasyonu kapatıyoruz.
+# --- MİMARİ DÜZELTME: PORTABILITY FIX ---
 set(GGML_NATIVE OFF CACHE BOOL "Disable native instruction set optimization for portability" FORCE)
 
-# Eğer MSVC değilse (Linux/GCC), generic x86-64 seviyesini belirleyebiliriz.
-# Ancak GGML_NATIVE=OFF yeterlidir, cmake varsayılanları kullanır.
 if(NOT MSVC)
-    # Opsiyonel: Daha geniş uyumluluk için.
-    # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=x86-64 -mtune=generic")
+    # Generic x86-64 support
 endif()
-# -------------------------------------------------------------------
 
 # --- Bağımlılıklar (vcpkg) ---
 find_package(gRPC CONFIG REQUIRED)
@@ -58,7 +51,8 @@ include(FetchContent)
 FetchContent_Declare(
   sentiric_contracts
   GIT_REPOSITORY https://github.com/sentiric/sentiric-contracts.git
-  GIT_TAG v1.12.0
+  # DÜZELTME: Kritik versiyon senkronizasyonu (v1.12.0 -> v1.13.5)
+  GIT_TAG v1.13.5
 )
 FetchContent_MakeAvailable(sentiric_contracts)
 
@@ -133,7 +127,7 @@ if(GGML_CUDA)
     target_link_libraries(stt_service PRIVATE CUDA::cudart CUDA::cuda_driver)
 endif()
 
-# --- CLI Tool (Test İçin) ---
+# --- CLI Tool ---
 add_executable(stt_cli
     src/cli/main.cpp
     src/cli/audio_client.cpp
