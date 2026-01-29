@@ -51,8 +51,7 @@ include(FetchContent)
 FetchContent_Declare(
   sentiric_contracts
   GIT_REPOSITORY https://github.com/sentiric/sentiric-contracts.git
-  # DÜZELTME: Kritik versiyon senkronizasyonu (v1.12.0 -> v1.13.5)
-  GIT_TAG v1.13.5
+  GIT_TAG v1.13.6
 )
 FetchContent_MakeAvailable(sentiric_contracts)
 
