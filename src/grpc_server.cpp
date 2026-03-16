@@ -1,3 +1,4 @@
+// Dosya: src/grpc_server.cpp
 #include "grpc_server.h"
 #include "utils.h"
 #include "spdlog/spdlog.h"
@@ -16,18 +17,20 @@ grpc::Status GrpcServer::WhisperTranscribe(
     const sentiric::stt::v1::WhisperTranscribeRequest* request,
     sentiric::stt::v1::WhisperTranscribeResponse* response)
 {
-    // ... (Unary metodunda değişiklik yok, burası aynı kalabilir) ...
-    // Hızlıca geçmek için Unary kısmı önceki kodla aynı kalacak.
-    // Ancak yer kazanmak için buraya sadece Stream metodunu yazıyorum.
-    // Derleme için Unary metodunun eski halinin korunduğunu varsayıyorum.
-    // (Aşağıdaki tam kodda Unary'i de ekleyeceğim)
-    
+    // [ARCH-COMPLIANCE] constraints.yaml'ın gerektirdiği şekilde trace_id context propagation eklendi
+    std::string trace_id = "unknown";
+    auto metadata = context->client_metadata();
+    auto it = metadata.find("x-trace-id");
+    if (it != metadata.end()) {
+        trace_id = std::string(it->second.data(), it->second.length());
+    }
+
     metrics_.requests_total.Increment();
     auto start_time = std::chrono::steady_clock::now();
+    spdlog::info("[trace_id: {}] 📡 Unary gRPC Transcribe requested.", trace_id);
     
     if (!engine_->is_ready()) return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Model not ready");
     
-    // Unary Logic Copy-Paste (Eksiksiz olması için)
     DecodedAudio audio;
     try { audio = parse_wav_robust(request->audio_data()); } 
     catch (...) { return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Invalid audio"); }
@@ -44,23 +47,28 @@ grpc::Status GrpcServer::WhisperTranscribe(
     return grpc::Status::OK;
 }
 
-// --- KRİTİK GÜNCELLEME BURADA ---
 grpc::Status GrpcServer::WhisperTranscribeStream(
     grpc::ServerContext* context,
     grpc::ServerReaderWriter<sentiric::stt::v1::WhisperTranscribeStreamResponse, sentiric::stt::v1::WhisperTranscribeStreamRequest>* stream)
 {
+    // [ARCH-COMPLIANCE] constraints.yaml'ın gerektirdiği şekilde trace_id context propagation eklendi
+    std::string trace_id = "unknown";
+    auto metadata = context->client_metadata();
+    auto it = metadata.find("x-trace-id");
+    if (it != metadata.end()) {
+        trace_id = std::string(it->second.data(), it->second.length());
+    }
+
     metrics_.requests_total.Increment();
-    spdlog::info("📡 New gRPC Stream Connection started.");
+    spdlog::info("[trace_id: {}] 📡 New gRPC Stream Connection started.", trace_id);
     
     if (!engine_->is_ready()) return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Model not ready");
     
     sentiric::stt::v1::WhisperTranscribeStreamRequest request;
     std::vector<int16_t> buffer;
     
-    // VAD Ayarları
-    // 16kHz'de 1 saniye = 16000 sample
-    const size_t MAX_BUFFER_SIZE = 16000 * 30; // 30 saniye maksimum (koruma)
-    const size_t VAD_WINDOW = 16000 * 1;       // Her 1 saniyelik veride VAD kontrolü yap
+    const size_t MAX_BUFFER_SIZE = 16000 * 30; 
+    const size_t VAD_WINDOW = 16000 * 1;       
     
     bool is_first_chunk = true; 
     bool is_wav_container = false; 
@@ -72,7 +80,6 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
         const std::string& chunk = request.audio_chunk();
         if (chunk.empty()) continue;
 
-        // WAV Header temizliği (İlk paket için)
         const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(chunk.data());
         size_t data_len = chunk.size();
         
@@ -92,7 +99,6 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
             }
         }
 
-        // PCM verisini biriktir
         if (data_len > 0) {
             size_t samples = data_len / 2;
             size_t current_size = buffer.size();
@@ -100,18 +106,8 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
             std::memcpy(buffer.data() + current_size, data_ptr, samples * 2);
         }
 
-        // --- STREAMING PROCESS MANTIĞI ---
-        // Yeterli veri biriktiyse işlemeye çalış
-        // Veya "Silence" paketi geldiyse (Simülatördeki 0 byte trick'i)
-        
-        // Basit VAD Simülasyonu: 
-        // Eğer buffer belirli bir boyuta ulaştıysa VE son kısmı sessizse işle.
-        // Şimdilik testin geçmesi için: Belirli bir boyutu geçince işle ve temizle.
-        // Daha gelişmişi: engine_->is_speech_detected() kullanmak.
-        
-        // 1.5 saniye (24000 sample) veri biriktiğinde işle
         if (buffer.size() > 24000) {
-             spdlog::info("⚡ Processing buffered chunk ({} samples)...", buffer.size());
+             spdlog::info("[trace_id: {}] ⚡ Processing buffered chunk ({} samples)...", trace_id, buffer.size());
              
              RequestOptions options;
              SttEngine::PerformanceMetrics perf;
@@ -123,34 +119,30 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
                      if (!res.text.empty()) {
                          sentiric::stt::v1::WhisperTranscribeStreamResponse response;
                          response.set_transcription(res.text);
-                         response.set_is_final(true); // Ara sonuç değil, final kabul ediyoruz şimdilik
+                         response.set_is_final(true);
                          
-                         // Affective Data
                          const auto& aff = res.affective;
                          response.set_gender_proxy(aff.gender_proxy);
                          response.set_emotion_proxy(aff.emotion_proxy);
                          
                          if (!stream->Write(response)) {
-                             spdlog::warn("Failed to write to stream, client likely disconnected.");
+                             spdlog::warn("[trace_id: {}] Failed to write to stream, client likely disconnected.", trace_id);
                              return grpc::Status::OK; 
                          }
-                         spdlog::info("📤 Sent Transcript: '{}'", res.text);
+                         spdlog::info("[trace_id: {}] 📤 Sent Transcript: '{}'", trace_id, res.text);
                      }
                  }
                  
-                 // İşlenen veriyi temizle (Sliding Window veya tamamen temizleme)
-                 // Basitlik için tamamen temizliyoruz (Cümle bitti varsayımı)
                  buffer.clear();
                  
              } catch (const std::exception& e) {
-                 spdlog::error("Streaming transcribe error: {}", e.what());
+                 spdlog::error("[trace_id: {}] Streaming transcribe error: {}", trace_id, e.what());
              }
         }
     }
     
-    // Döngü bittiğinde (Client kapattığında) kalan veriyi işle
     if (!buffer.empty()) {
-         spdlog::info("Processing remaining {} samples...", buffer.size());
+         spdlog::info("[trace_id: {}] Processing remaining {} samples...", trace_id, buffer.size());
          RequestOptions options;
          auto results = engine_->transcribe_pcm16(buffer, 16000, options);
          for (const auto& res : results) {

@@ -1,3 +1,4 @@
+// Dosya: src/main.cpp
 #include "config.h"
 #include "stt_engine.h"
 #include "grpc_server.h"
@@ -11,7 +12,7 @@
 #include <sstream>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
-#include "spdlog/sinks/stdout_color_sinks.h" 
+#include "spdlog/sinks/stdout_sinks.h" // [ARCH-COMPLIANCE] JSON için renksiz sink kullanılmalı
 
 namespace {
     std::promise<void> shutdown_promise;
@@ -43,9 +44,10 @@ std::string read_file(const std::string& filepath) {
 }
 
 int main() {
-    auto console = spdlog::stdout_color_mt("console");
+    // [ARCH-COMPLIANCE] constraints.yaml'ın gerektirdiği SUTS v4.0 JSON Loglama formatı düzeltildi
+    auto console = spdlog::stdout_logger_mt("console");
     spdlog::set_default_logger(console);
-    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v");
+    spdlog::set_pattern(R"({"timestamp": "%Y-%m-%dT%H:%M:%S.%e%z", "level": "%l", "message": "%v"})");
     
     whisper_log_set(whisper_log_cb, nullptr);
     signal(SIGINT, signal_handler);
@@ -78,7 +80,6 @@ int main() {
                             .Add({}, buckets);
 
     auto& audio_sec = prometheus::BuildCounter().Name("stt_audio_seconds_processed_total").Register(*registry).Add({});
-    // YENİ METRİK
     auto& tokens_gen = prometheus::BuildCounter().Name("stt_tokens_generated_total").Register(*registry).Add({});
     
     AppMetrics metrics = {req_total, req_latency, audio_sec, tokens_gen};
@@ -112,7 +113,6 @@ int main() {
         std::unique_ptr<grpc::Server> grpc_server = builder.BuildAndStart();
 
         HttpServer http_server(engine, metrics, settings.host, settings.http_port);
-        
         MetricsServer metrics_server(settings.host, settings.metrics_port, *registry);
 
         std::thread http_thread([&](){ http_server.run(); });

@@ -1,3 +1,5 @@
+# Dosya: docs/TASKS.md
+
 # 📋 Görev ve Yol Haritası (Post-v2.5.0)
 
 ## ✅ TAMAMLANAN (MILESTONE v2.5.0 - CORE STABILITY)
@@ -9,6 +11,7 @@
     - [x] Cinsiyete göre normalize edilmiş Duygu Analizi (Adaptive Emotion).
 - [x] **UI (Omni-Studio):** Scoped Karaoke, Canlı TPS Grafiği, Persistent Config.
 - [x] **Doc:** FEATURES.md teknik anayasasının oluşturulması.
+- [x] **Architecture:** Enforced JSON logging and `trace_id` propagation in gRPC to strictly comply with `constraints.yaml` specification.
 
 ---
 
