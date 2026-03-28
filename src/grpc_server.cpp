@@ -1,7 +1,7 @@
 // Dosya: src/grpc_server.cpp
 #include "grpc_server.h"
 #include "utils.h"
-#include "spdlog/spdlog.h"
+#include "suts_logger.h" // [YENİ]
 #include <chrono>
 #include <vector>
 #include <cstring>
@@ -17,23 +17,31 @@ grpc::Status GrpcServer::WhisperTranscribe(
     const sentiric::stt::v1::WhisperTranscribeRequest* request,
     sentiric::stt::v1::WhisperTranscribeResponse* response)
 {
-    // [ARCH-COMPLIANCE] constraints.yaml'ın gerektirdiği şekilde trace_id context propagation eklendi
-    std::string trace_id = "unknown";
+    std::string trace_id = "unknown", span_id = "unknown", tenant_id = "unknown";
     auto metadata = context->client_metadata();
-    auto it = metadata.find("x-trace-id");
-    if (it != metadata.end()) {
-        trace_id = std::string(it->second.data(), it->second.length());
+    
+    if (auto it = metadata.find("x-trace-id"); it != metadata.end()) trace_id = std::string(it->second.data(), it->second.length());
+    if (auto it = metadata.find("x-span-id"); it != metadata.end()) span_id = std::string(it->second.data(), it->second.length());
+    if (auto it = metadata.find("x-tenant-id"); it != metadata.end()) tenant_id = std::string(it->second.data(), it->second.length());
+
+    // [ARCH-COMPLIANCE] Strict Tenant Isolation Fail-Fast
+    if (tenant_id == "unknown" || tenant_id.empty()) {
+        SUTS_ERROR("MISSING_TENANT_ID", trace_id, span_id, tenant_id, "Tenant ID is missing in gRPC metadata. Request rejected.");
+        return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "tenant_id is strictly required for isolation");
     }
 
     metrics_.requests_total.Increment();
     auto start_time = std::chrono::steady_clock::now();
-    spdlog::info("[trace_id: {}] 📡 Unary gRPC Transcribe requested.", trace_id);
+    SUTS_INFO("STT_UNARY_REQUEST", trace_id, span_id, tenant_id, "📡 Unary gRPC Transcribe requested.");
     
     if (!engine_->is_ready()) return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Model not ready");
     
     DecodedAudio audio;
     try { audio = parse_wav_robust(request->audio_data()); } 
-    catch (...) { return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Invalid audio"); }
+    catch (...) { 
+        SUTS_ERROR("STT_INVALID_AUDIO", trace_id, span_id, tenant_id, "Invalid audio format received.");
+        return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Invalid audio"); 
+    }
     
     RequestOptions options; 
     if (request->has_language()) options.language = request->language();
@@ -44,6 +52,8 @@ grpc::Status GrpcServer::WhisperTranscribe(
         response->set_transcription(results[0].text);
         response->set_language(results[0].language);
     }
+    
+    SUTS_INFO("STT_UNARY_COMPLETE", trace_id, span_id, tenant_id, "✅ Unary transcription completed.");
     return grpc::Status::OK;
 }
 
@@ -51,16 +61,21 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     grpc::ServerContext* context,
     grpc::ServerReaderWriter<sentiric::stt::v1::WhisperTranscribeStreamResponse, sentiric::stt::v1::WhisperTranscribeStreamRequest>* stream)
 {
-    // [ARCH-COMPLIANCE] constraints.yaml'ın gerektirdiği şekilde trace_id context propagation eklendi
-    std::string trace_id = "unknown";
+    std::string trace_id = "unknown", span_id = "unknown", tenant_id = "unknown";
     auto metadata = context->client_metadata();
-    auto it = metadata.find("x-trace-id");
-    if (it != metadata.end()) {
-        trace_id = std::string(it->second.data(), it->second.length());
+    
+    if (auto it = metadata.find("x-trace-id"); it != metadata.end()) trace_id = std::string(it->second.data(), it->second.length());
+    if (auto it = metadata.find("x-span-id"); it != metadata.end()) span_id = std::string(it->second.data(), it->second.length());
+    if (auto it = metadata.find("x-tenant-id"); it != metadata.end()) tenant_id = std::string(it->second.data(), it->second.length());
+
+    // [ARCH-COMPLIANCE] Strict Tenant Isolation Fail-Fast
+    if (tenant_id == "unknown" || tenant_id.empty()) {
+        SUTS_ERROR("MISSING_TENANT_ID", trace_id, span_id, tenant_id, "Tenant ID is missing in gRPC metadata. Request rejected.");
+        return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "tenant_id is strictly required for isolation");
     }
 
     metrics_.requests_total.Increment();
-    spdlog::info("[trace_id: {}] 📡 New gRPC Stream Connection started.", trace_id);
+    SUTS_INFO("STT_STREAM_STARTED", trace_id, span_id, tenant_id, "📡 New gRPC Stream Connection started.");
     
     if (!engine_->is_ready()) return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Model not ready");
     
@@ -107,7 +122,7 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
         }
 
         if (buffer.size() > 24000) {
-             spdlog::info("[trace_id: {}] ⚡ Processing buffered chunk ({} samples)...", trace_id, buffer.size());
+             SUTS_DEBUG("STT_BUFFER_PROCESSING", trace_id, span_id, tenant_id, "⚡ Processing buffered chunk ({} samples)...", buffer.size());
              
              RequestOptions options;
              SttEngine::PerformanceMetrics perf;
@@ -126,23 +141,23 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
                          response.set_emotion_proxy(aff.emotion_proxy);
                          
                          if (!stream->Write(response)) {
-                             spdlog::warn("[trace_id: {}] Failed to write to stream, client likely disconnected.", trace_id);
+                             SUTS_WARN("CLIENT_DISCONNECTED", trace_id, span_id, tenant_id, "Failed to write to stream, client likely disconnected.");
                              return grpc::Status::OK; 
                          }
-                         spdlog::info("[trace_id: {}] 📤 Sent Transcript: '{}'", trace_id, res.text);
+                         SUTS_INFO("STT_TRANSCRIPT_SENT", trace_id, span_id, tenant_id, "📤 Sent Transcript: '{}'", res.text);
                      }
                  }
                  
                  buffer.clear();
                  
              } catch (const std::exception& e) {
-                 spdlog::error("[trace_id: {}] Streaming transcribe error: {}", trace_id, e.what());
+                 SUTS_ERROR("STT_STREAM_ERROR", trace_id, span_id, tenant_id, "Streaming transcribe error: {}", e.what());
              }
         }
     }
     
     if (!buffer.empty()) {
-         spdlog::info("[trace_id: {}] Processing remaining {} samples...", trace_id, buffer.size());
+         SUTS_DEBUG("STT_FLUSHING_BUFFER", trace_id, span_id, tenant_id, "Processing remaining {} samples...", buffer.size());
          RequestOptions options;
          auto results = engine_->transcribe_pcm16(buffer, 16000, options);
          for (const auto& res : results) {
@@ -154,6 +169,7 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
              }
          }
     }
-
+    
+    SUTS_INFO("STT_STREAM_COMPLETED", trace_id, span_id, tenant_id, "✅ gRPC Stream Connection closed cleanly.");
     return grpc::Status::OK;
 }

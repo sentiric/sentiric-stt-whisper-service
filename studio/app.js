@@ -312,8 +312,18 @@ const UI = {
         fd.append('prompt', $('#promptInput').value); fd.append('temperature', $('#tempRange').value);
         fd.append('prosody_lpf_alpha', $('#lpfRange').value); fd.append('prosody_pitch_gate', $('#pitchGateRange').value);
         const tempId = this.showLoading();
+        
         try {
-            const t0 = Date.now(); const r = await fetch('/v1/transcribe', { method: 'POST', body: fd });
+            const t0 = Date.now(); 
+            const r = await fetch('/v1/transcribe', { 
+                method: 'POST', 
+                // [ARCH-COMPLIANCE] Strict Tenant Isolation ve Tracing gereksinimleri
+                headers: {
+                    'x-tenant-id': 'sentiric_studio',
+                    'x-trace-id': 'ui-req-' + Date.now()
+                },
+                body: fd 
+            });
             const d = await r.json(); this.removeLoading(tempId);
             if(r.ok) {
                 const url = URL.createObjectURL(blob);

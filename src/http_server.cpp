@@ -1,6 +1,7 @@
+// Dosya: src/http_server.cpp
 #include "http_server.h"
 #include "utils.h"
-#include "spdlog/spdlog.h"
+#include "suts_logger.h" // [YENİ]
 #include "nlohmann/json.hpp"
 #include <prometheus/text_serializer.h>
 #include <sstream>
@@ -12,14 +13,11 @@ using namespace sentiric::utils;
 MetricsServer::MetricsServer(const std::string& host, int port, prometheus::Registry& registry)
     : host_(host), port_(port), registry_(registry) {
     
-    // YENİ: CORS Headerları eklendi. Omni-Studio (15030) buradan (15032) veri çekebilsin.
-    svr_.Get("/metrics", [this](const httplib::Request &, httplib::Response &res) {
+    svr_.Get("/metrics",[this](const httplib::Request &, httplib::Response &res) {
         prometheus::TextSerializer serializer;
         auto collected_metrics = this->registry_.Collect();
         std::stringstream ss; serializer.Serialize(ss, collected_metrics);
         
-        // NOT: Production ortamında '*' yerine belirli domainlerin (örn: dashboard domaini)
-        // verilmesi güvenlik açısından daha doğrudur. Standalone kullanım kolaylığı için '*' bırakılmıştır.
         res.set_header("Access-Control-Allow-Origin", "*"); 
         res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
@@ -27,15 +25,14 @@ MetricsServer::MetricsServer(const std::string& host, int port, prometheus::Regi
         res.set_content(ss.str(), "text/plain; version=0.0.4");
     });
 
-    // Options isteği için de (Preflight)
-    svr_.Options("/metrics", [](const httplib::Request &, httplib::Response &res) {
+    svr_.Options("/metrics",[](const httplib::Request &, httplib::Response &res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
         res.status = 204;
     });
 }
-void MetricsServer::run() { spdlog::info("📊 Metrics server listening on {}:{}", host_, port_); svr_.listen(host_.c_str(), port_); }
+void MetricsServer::run() { SUTS_INFO("METRICS_SERVER_READY", "", "", "", "📊 Metrics server listening on {}:{}", host_, port_); svr_.listen(host_.c_str(), port_); }
 void MetricsServer::stop() { if (svr_.is_running()) svr_.stop(); }
 
 HttpServer::HttpServer(std::shared_ptr<SttEngine> engine, AppMetrics& metrics, const std::string& host, int port)
@@ -43,23 +40,40 @@ HttpServer::HttpServer(std::shared_ptr<SttEngine> engine, AppMetrics& metrics, c
 
 void HttpServer::setup_routes() {
     auto ret = svr_.set_mount_point("/", "./studio");
-    if (!ret) spdlog::warn("⚠️ Could not mount ./studio directory.");
-    svr_.Get("/health", [this](const httplib::Request &, httplib::Response &res) {
+    if (!ret) SUTS_WARN("STUDIO_MOUNT_FAIL", "", "", "", "⚠️ Could not mount ./studio directory.");
+    
+    svr_.Get("/health",[this](const httplib::Request &, httplib::Response &res) {
         bool ready = engine_->is_ready();
-        // VERSİYON GÜNCELLENDİ: 2.5.0 -> 2.5.1
-        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.5.1"}, {"api_compatibility", "openai-whisper"} };
+        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.5.2"}, {"api_compatibility", "openai-whisper"} };
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(response.dump(), "application/json"); res.status = ready ? 200 : 503;
     });
 
     auto transcribe_handler = [this](const httplib::Request &req, httplib::Response &res) {
         res.set_header("Access-Control-Allow-Origin", "*"); metrics_.requests_total.Increment();
+        
+        std::string trace_id = req.get_header_value("x-trace-id");
+        std::string span_id = req.get_header_value("x-span-id");
+        std::string tenant_id = req.get_header_value("x-tenant-id");
+
+        if (trace_id.empty()) trace_id = "unknown";
+        if (span_id.empty()) span_id = "unknown";
+        if (tenant_id.empty()) tenant_id = "unknown";
+
+        // [ARCH-COMPLIANCE] Strict Tenant Isolation Fail-Fast
+        if (tenant_id == "unknown") {
+            SUTS_ERROR("MISSING_TENANT_ID", trace_id, span_id, tenant_id, "Tenant ID is missing in HTTP headers. Request rejected.");
+            res.status = 400; 
+            res.set_content(json{{"error", "tenant_id header is strictly required"}}.dump(), "application/json"); 
+            return;
+        }
+
         if (!engine_->is_ready()) { res.status = 503; res.set_content(json{{"error", "Model not ready"}}.dump(), "application/json"); return; }
         if (!req.has_file("file")) { res.status = 400; res.set_content(json{{"error", "No file uploaded."}}.dump(), "application/json"); return; }
+        
         const auto& file = req.get_file_value("file");
         RequestOptions opts;
         
-        // --- Standart Parametreler ---
         if (req.has_file("language")) opts.language = req.get_file_value("language").content;
         if (req.has_file("prompt")) opts.prompt = req.get_file_value("prompt").content;
         if (req.has_file("temperature")) { try { opts.temperature = std::stof(req.get_file_value("temperature").content); } catch(...) {} }
@@ -67,7 +81,6 @@ void HttpServer::setup_routes() {
         if (req.has_file("translate")) { std::string val = req.get_file_value("translate").content; opts.translate = (val == "true" || val == "1"); }
         if (req.has_file("diarization")) { std::string val = req.get_file_value("diarization").content; opts.enable_diarization = (val == "true" || val == "1"); }
         
-        // --- YENİ: Gelişmiş DSP Parametreleri ---
         if (req.has_file("prosody_lpf_alpha")) { 
             try { opts.prosody_opts.lpf_alpha = std::stof(req.get_file_value("prosody_lpf_alpha").content); } catch(...) {} 
         }
@@ -75,22 +88,18 @@ void HttpServer::setup_routes() {
             try { opts.prosody_opts.gender_threshold = std::stof(req.get_file_value("prosody_pitch_gate").content); } catch(...) {} 
         }
 
-        spdlog::info("🎤 Processing: {}b | Lang: {} | LPF: {:.3f}", file.content.size(), opts.language, opts.prosody_opts.lpf_alpha);
+        SUTS_INFO("HTTP_TRANSCRIBE_REQUEST", trace_id, span_id, tenant_id, "🎤 Processing: {}b | Lang: {} | LPF: {:.3f}", file.content.size(), opts.language, opts.prosody_opts.lpf_alpha);
         
         try {
             auto start_time = std::chrono::steady_clock::now();
             DecodedAudio audio = parse_wav_robust(file.content);
             if (audio.pcm_data.empty()) throw std::runtime_error("Parsed WAV data is empty.");
             
-            // --- Abort Callback Lambda ---
-            // HTTP sunucusu blocking olduğu için şu anlık abort callback vermiyoruz.
-            // İleride async yapıya geçilirse buraya eklenebilir.
-            
             auto results = engine_->transcribe_pcm16(audio.pcm_data, audio.sample_rate, opts);
             auto end_time = std::chrono::steady_clock::now(); std::chrono::duration<double> processing_time = end_time - start_time;
             
             std::string full_text; std::string detected_lang = "unknown"; json segments = json::array();
-            int total_tokens = 0; // Metrik için
+            int total_tokens = 0; 
 
             for (const auto& r : results) {
                 std::string safe_text = clean_utf8(r.text); full_text += safe_text; detected_lang = r.language;
@@ -113,7 +122,6 @@ void HttpServer::setup_routes() {
             }
             double duration = static_cast<double>(audio.pcm_data.size()) / static_cast<double>(audio.sample_rate);
             
-            // Metrik Güncellemeleri
             metrics_.audio_seconds_processed_total.Increment(duration); 
             metrics_.request_latency.Observe(processing_time.count());
             metrics_.tokens_generated_total.Increment(total_tokens);
@@ -124,7 +132,7 @@ void HttpServer::setup_routes() {
             };
             res.set_content(response.dump(), "application/json");
         } catch (const std::exception& e) {
-            spdlog::error("Transcription error: {}", e.what());
+            SUTS_ERROR("TRANSCRIPTION_ERROR", trace_id, span_id, tenant_id, "Transcription error: {}", e.what());
             res.status = 500; res.set_content(json{{"error", e.what()}}.dump(), "application/json");
         }
     };
@@ -132,5 +140,5 @@ void HttpServer::setup_routes() {
     svr_.Post("/v1/audio/transcriptions", transcribe_handler);
 }
 
-void HttpServer::run() { spdlog::info("🌐 HTTP server (Studio & API) listening on {}:{}", host_, port_); svr_.listen(host_.c_str(), port_); }
+void HttpServer::run() { SUTS_INFO("HTTP_SERVER_READY", "", "", "", "🌐 HTTP server (Studio & API) listening on {}:{}", host_, port_); svr_.listen(host_.c_str(), port_); }
 void HttpServer::stop() { if (svr_.is_running()) svr_.stop(); }

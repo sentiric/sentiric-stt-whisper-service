@@ -4,6 +4,7 @@
 #include "grpc_server.h"
 #include "http_server.h"
 #include "model_manager.h" 
+#include "suts_logger.h" // [YENİ]
 #include <thread>
 #include <memory>
 #include <csignal>
@@ -12,14 +13,14 @@
 #include <sstream>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
-#include "spdlog/sinks/stdout_sinks.h" // [ARCH-COMPLIANCE] JSON için renksiz sink kullanılmalı
+#include <spdlog/sinks/stdout_sinks.h> //[ARCH-COMPLIANCE] Renksiz (JSON uyumlu)
 
 namespace {
     std::promise<void> shutdown_promise;
 }
 
 void signal_handler(int signal) {
-    spdlog::warn("Signal {} received. Initiating graceful shutdown...", signal);
+    SUTS_WARN("SERVICE_SHUTDOWN", "", "", "", "🛑 Signal {} received. Initiating graceful shutdown...", signal);
     try { shutdown_promise.set_value(); } catch (...) {}
 }
 
@@ -28,10 +29,10 @@ void whisper_log_cb(ggml_log_level level, const char * text, void * user_data) {
     std::string msg(text);
     if (!msg.empty() && msg.back() == '\n') msg.pop_back();
     switch(level) {
-        case GGML_LOG_LEVEL_ERROR: spdlog::error("[whisper] {}", msg); break;
-        case GGML_LOG_LEVEL_WARN: spdlog::warn("[whisper] {}", msg); break;
-        case GGML_LOG_LEVEL_INFO: spdlog::info("[whisper] {}", msg); break;
-        default: spdlog::debug("[whisper] {}", msg); break;
+        case GGML_LOG_LEVEL_ERROR: SUTS_ERROR("WHISPER_CPP_ERROR", "", "", "", "[whisper] {}", msg); break;
+        case GGML_LOG_LEVEL_WARN: SUTS_WARN("WHISPER_CPP_WARN", "", "", "", "[whisper] {}", msg); break;
+        case GGML_LOG_LEVEL_INFO: SUTS_DEBUG("WHISPER_CPP_INFO", "", "", "", "[whisper] {}", msg); break;
+        default: SUTS_DEBUG("WHISPER_CPP_DEBUG", "", "", "", "[whisper] {}", msg); break;
     }
 }
 
@@ -44,10 +45,11 @@ std::string read_file(const std::string& filepath) {
 }
 
 int main() {
-    // [ARCH-COMPLIANCE] constraints.yaml'ın gerektirdiği SUTS v4.0 JSON Loglama formatı düzeltildi
-    auto console = spdlog::stdout_logger_mt("console");
+    // [ARCH-COMPLIANCE] SUTS v4.0 Formatter Kurulumu
+    auto sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
+    sink->set_formatter(std::make_unique<suts::SutsFormatter>());
+    auto console = std::make_shared<spdlog::logger>("stt-whisper-service", sink);
     spdlog::set_default_logger(console);
-    spdlog::set_pattern(R"({"timestamp": "%Y-%m-%dT%H:%M:%S.%e%z", "level": "%l", "message": "%v"})");
     
     whisper_log_set(whisper_log_cb, nullptr);
     signal(SIGINT, signal_handler);
@@ -56,17 +58,17 @@ int main() {
     auto settings = load_settings();
     spdlog::set_level(spdlog::level::from_str(settings.log_level));
     
-    spdlog::info("🚀 Sentiric STT Whisper Service (C++) Starting...");
-    spdlog::info("Config: Model={}, Threads={}", settings.model_filename, settings.n_threads);
+    SUTS_INFO("SERVICE_START", "", "", "", "🚀 Sentiric STT Whisper Service (C++) Starting...v2.5.2");
+    SUTS_INFO("SERVICE_CONFIGURED", "", "", "", "Config: Model={}, Threads={}", settings.model_filename, settings.n_threads);
 
     try {
-        spdlog::info("📦 Checking models...");
+        SUTS_INFO("MODEL_CHECK", "", "", "", "📦 Checking models...");
         ModelManager::ensure_model(settings);
         if (settings.enable_vad) {
             ModelManager::ensure_vad_model(settings);
         }
     } catch (const std::exception& e) {
-        spdlog::critical("Model provisioning failed: {}", e.what());
+        SUTS_ERROR("MODEL_LOAD_FAIL", "", "", "", "Model provisioning failed: {}", e.what());
         return 1;
     }
 
@@ -96,7 +98,7 @@ int main() {
         
         if (settings.grpc_ca_path.empty()) {
             builder.AddListeningPort(grpc_addr, grpc::InsecureServerCredentials());
-            spdlog::warn("gRPC listening on {} (INSECURE)", grpc_addr);
+            SUTS_WARN("TLS_INSECURE_MODE", "", "", "", "gRPC listening on {} (INSECURE)", grpc_addr);
         } else {
             std::string root = read_file(settings.grpc_ca_path);
             std::string cert = read_file(settings.grpc_cert_path);
@@ -106,7 +108,7 @@ int main() {
             ssl_opts.pem_root_certs = root;
             ssl_opts.pem_key_cert_pairs.push_back(pkcp);
             builder.AddListeningPort(grpc_addr, grpc::SslServerCredentials(ssl_opts));
-            spdlog::info("gRPC listening on {} (mTLS Enabled)", grpc_addr);
+            SUTS_INFO("TLS_CONFIGURED", "", "", "", "gRPC listening on {} (mTLS Enabled)", grpc_addr);
         }
 
         builder.RegisterService(&grpc_service);
@@ -118,11 +120,11 @@ int main() {
         std::thread http_thread([&](){ http_server.run(); });
         std::thread metrics_thread([&](){ metrics_server.run(); });
         
-        spdlog::info("✅ Service Ready!");
+        SUTS_INFO("ALL_SERVERS_READY", "", "", "", "✅ Service Ready!");
 
         shutdown_promise.get_future().wait();
         
-        spdlog::info("Stopping servers...");
+        SUTS_INFO("SERVER_STOPPING", "", "", "", "Stopping servers...");
         grpc_server->Shutdown();
         http_server.stop();
         metrics_server.stop();
@@ -131,7 +133,7 @@ int main() {
         if(metrics_thread.joinable()) metrics_thread.join();
 
     } catch (const std::exception& e) {
-        spdlog::critical("Fatal error: {}", e.what());
+        SUTS_ERROR("SERVICE_CRASH", "", "", "", "Fatal error: {}", e.what());
         return 1;
     }
 
