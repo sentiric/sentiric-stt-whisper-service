@@ -44,7 +44,7 @@ void HttpServer::setup_routes() {
     
     svr_.Get("/health",[this](const httplib::Request &, httplib::Response &res) {
         bool ready = engine_->is_ready();
-        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.5.2"}, {"api_compatibility", "openai-whisper"} };
+        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.5.3"}, {"api_compatibility", "openai-whisper"} };
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(response.dump(), "application/json"); res.status = ready ? 200 : 503;
     });

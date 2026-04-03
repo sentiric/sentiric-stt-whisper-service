@@ -136,56 +136,57 @@ namespace sentiric::utils {
         return result;
     }
 
+    // [ARCH-COMPLIANCE] Whisper'in halüsinasyonlarını tespit etmek için geliştirilmiş kapsamlı bir fonksiyon.
+    // [ARCH-COMPLIANCE] Virgül hatası ve UTF-8 bozulması engellendi. Merkezi Halüsinasyon Filtresi.
     inline bool is_hallucination(const std::string& text) {
         if (text.empty()) return true;
         
-        // 1. Çok kısa ve anlamsız metinler
+        // 1. Çok kısa metinler
         if (text.length() < 2) return true;
         
-        // 2. Sadece noktalama işaretleri
+        // 2. Sadece noktalama işaretlerinden oluşan metinler
         if (text.find_first_not_of(" \t\n\v\f\r.,?!") == std::string::npos) return true;
 
-        // 3. Köşeli parantezli ses efektleri
+        // 3. Whisper'ın ürettiği köşeli/normal parantezli ses efektleri [Müzik], (Gülüşmeler)
         if (text.front() == '[' && text.back() == ']') return true;
         if (text.front() == '(' && text.back() == ')') return true;
 
-        // 4. Yasaklı Kelime Listesi (Whisper Hallucinations & Noise Artifacts)
-        static const std::vector<std::string> banned = {
-            "altyazı", "sesli betimleme", "senkron", "www.", ".com",
-            "izlediğiniz için", "teşekkürler", "thank you", "thanks for watching",
-            "İzlediğiniz için teşekkür ederim."
-            "abone ol", "videoyu beğen", "bir sonraki videoda",
-            "devam edecek", "transcription:", "subtitle:",
+        // 4. Kesin ve Kapsamlı Yasaklı Kelimeler (UTF-8 Güvenli)
+        static const std::vector<std::string> banned_phrases = {
+            "altyazı", "Altyazı", "ALTYAZI",
+            "sesli betimleme", "Sesli betimleme",
+            "senkron", "Senkron",
+            "www.", ".com",
+            "izlediğiniz için", "İzlediğiniz için", "İZLEDİĞİNİZ İÇİN",
+            "teşekkürler", "Teşekkürler", "TEŞEKKÜRLER",
+            "teşekkür ederim", "Teşekkür ederim", "TEŞEKKÜR EDERİM",
+            "thank you", "Thank you", "Thanks for watching",
+            "abone ol", "Abone ol", "videoyu beğen", "bir sonraki videoda",
+            "devam edecek", "Devam edecek", "transcription:", "subtitle:",
             "2分", "ご視聴", 
-            "I'm going to go", "Okay.", "Bye.",
-            // [EKLENEN] Gürültüden kaynaklı sık uydurmalar
-            "Hıhı", "Pffft", "Ehem", "Hmm", "Aa", "Ah", "Oh", "Eh" 
+            "I'm going to go", "Okay.", "Bye.", "Ahem.", "Ahem"
         };
 
-        std::string lower = text;
-        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-
-        // Tam eşleşme kontrolü (Kısa kelimeler için)
-        // Örneğin "Ah" kelimesi normal bir cümlenin içinde geçebilir ("Ahmet geldi"),
-        // ama tek başına "Ah." ise halüsinasyondur.
-        
-        // Önce "contains" kontrolü (Uzunlar için)
-        for (const auto& phrase : banned) {
-            if (phrase.length() > 4 && lower.find(phrase) != std::string::npos) return true;
+        for (const auto& phrase : banned_phrases) {
+            if (text.find(phrase) != std::string::npos) {
+                return true;
+            }
         }
         
-        // Sonra "exact match" veya "stripped match" kontrolü (Kısalar için)
-        std::string stripped = lower;
-        // Sondaki noktalamayı sil
+        // 5. Kısa gürültü sesleri (Pffft, Hıhı vb.) için noktalama temizliği
+        std::string stripped = text;
         while (!stripped.empty() && ispunct(stripped.back())) stripped.pop_back();
         while (!stripped.empty() && ispunct(stripped.front())) stripped.erase(0, 1);
-        
-        for (const auto& phrase : banned) {
-            std::string phrase_lower = phrase;
-            std::transform(phrase_lower.begin(), phrase_lower.end(), phrase_lower.begin(), ::tolower);
-            if (phrase.length() <= 4 && stripped == phrase_lower) return true;
+
+        static const std::vector<std::string> short_noises = {
+            "Hıhı", "hıhı", "Pffft", "pffft", "Ehem", "ehem", "Hmm", "hmm",
+            "Aa", "aa", "Ah", "ah", "Oh", "oh", "Eh", "eh"
+        };
+
+        for (const auto& noise : short_noises) {
+            if (stripped == noise) return true;
         }
 
         return false;
-    }    
+    }
 }
