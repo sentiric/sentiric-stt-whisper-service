@@ -55,7 +55,7 @@ namespace suts {
             const char* host = std::getenv("HOSTNAME");
             j["resource"] = {
                 {"service.name", "stt-whisper-service"},
-                {"service.version", "2.5.3"},
+                {"service.version", "2.5.4"},
                 {"service.env", env_p ? env_p : "production"},
                 {"host.name", host ? host : "unknown"}
             };

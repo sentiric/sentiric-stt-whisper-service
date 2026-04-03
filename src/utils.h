@@ -136,22 +136,24 @@ namespace sentiric::utils {
         return result;
     }
 
+    inline std::string trim(const std::string& str) {
+        size_t first = str.find_first_not_of(" \t\n\r\f\v");
+        if (first == std::string::npos) return "";
+        size_t last = str.find_last_not_of(" \t\n\r\f\v");
+        return str.substr(first, (last - first + 1));
+    }    
+
     // [ARCH-COMPLIANCE] Whisper'in halüsinasyonlarını tespit etmek için geliştirilmiş kapsamlı bir fonksiyon.
     // [ARCH-COMPLIANCE] Virgül hatası ve UTF-8 bozulması engellendi. Merkezi Halüsinasyon Filtresi.
-    inline bool is_hallucination(const std::string& text) {
+    inline bool is_hallucination(const std::string& raw_text) {
+        std::string text = trim(raw_text);
         if (text.empty()) return true;
         
-        // 1. Çok kısa metinler
         if (text.length() < 2) return true;
-        
-        // 2. Sadece noktalama işaretlerinden oluşan metinler
         if (text.find_first_not_of(" \t\n\v\f\r.,?!") == std::string::npos) return true;
-
-        // 3. Whisper'ın ürettiği köşeli/normal parantezli ses efektleri [Müzik], (Gülüşmeler)
         if (text.front() == '[' && text.back() == ']') return true;
         if (text.front() == '(' && text.back() == ')') return true;
 
-        // 4. Kesin ve Kapsamlı Yasaklı Kelimeler (UTF-8 Güvenli)
         static const std::vector<std::string> banned_phrases = {
             "altyazı", "Altyazı", "ALTYAZI",
             "sesli betimleme", "Sesli betimleme",
@@ -164,19 +166,38 @@ namespace sentiric::utils {
             "abone ol", "Abone ol", "videoyu beğen", "bir sonraki videoda",
             "devam edecek", "Devam edecek", "transcription:", "subtitle:",
             "2分", "ご視聴", 
-            "I'm going to go", "Okay.", "Bye.", "Ahem.", "Ahem"
+            "I'm going to go", "Okay.", "Bye.", "Ahem.", "Ahem", "Umarım", "umarım"
         };
 
+        std::string lower = text;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
         for (const auto& phrase : banned_phrases) {
-            if (text.find(phrase) != std::string::npos) {
-                return true;
+            if (phrase.length() > 4) {
+                if (lower.find(phrase) != std::string::npos || text.find(phrase) != std::string::npos) {
+                    return true;
+                }
             }
         }
         
-        // 5. Kısa gürültü sesleri (Pffft, Hıhı vb.) için noktalama temizliği
-        std::string stripped = text;
+        std::string stripped = lower;
         while (!stripped.empty() && ispunct(stripped.back())) stripped.pop_back();
         while (!stripped.empty() && ispunct(stripped.front())) stripped.erase(0, 1);
+        
+        std::string stripped_orig = text;
+        while (!stripped_orig.empty() && ispunct(stripped_orig.back())) stripped_orig.pop_back();
+        while (!stripped_orig.empty() && ispunct(stripped_orig.front())) stripped_orig.erase(0, 1);
+
+        for (const auto& phrase : banned_phrases) {
+            std::string phrase_lower = phrase;
+            std::transform(phrase_lower.begin(), phrase_lower.end(), phrase_lower.begin(), ::tolower);
+            
+            if (phrase.length() <= 6) {
+                if (stripped == phrase_lower || stripped_orig == phrase) {
+                    return true;
+                }
+            }
+        }
 
         static const std::vector<std::string> short_noises = {
             "Hıhı", "hıhı", "Pffft", "pffft", "Ehem", "ehem", "Hmm", "hmm",
@@ -184,7 +205,7 @@ namespace sentiric::utils {
         };
 
         for (const auto& noise : short_noises) {
-            if (stripped == noise) return true;
+            if (stripped == noise || stripped_orig == noise) return true;
         }
 
         return false;
