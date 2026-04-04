@@ -58,7 +58,7 @@ int main() {
     auto settings = load_settings();
     spdlog::set_level(spdlog::level::from_str(settings.log_level));
     
-    SUTS_INFO("SERVICE_START", "", "", "", "🚀 Sentiric STT Whisper Service (C++) Starting...v2.5.4");
+    SUTS_INFO("SERVICE_START", "", "", "", "🚀 Sentiric STT Whisper Service (C++) Starting...v2.5.5");
     SUTS_INFO("SERVICE_CONFIGURED", "", "", "", "Config: Model={}, Threads={}", settings.model_filename, settings.n_threads);
 
     try {

@@ -60,6 +60,9 @@ public:
     explicit SttEngine(const Settings& settings);
     ~SttEngine();
     bool is_ready() const;
+
+    // [YENİ]: Ayarları gRPC Server'a sunmak için getter
+    const Settings& get_settings() const { return settings_; }    
     
     struct PerformanceMetrics {
         double queue_time_ms;

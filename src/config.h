@@ -63,6 +63,10 @@ struct Settings {
     float cluster_threshold = 0.94f; 
 
     int sample_rate = 16000; 
+
+    // [YENİ]: Dinamik Stream Buffer Boyutu
+    int stream_buffer_samples = 8000; // Varsayılan 500ms (16000 * 0.5)
+
     std::string log_level = "info";
     std::string grpc_ca_path = "";
     std::string grpc_cert_path = "";
@@ -127,6 +131,11 @@ inline Settings load_settings() {
     
     s.logprob_threshold = get_float("STT_WHISPER_SERVICE_LOGPROB_THRESHOLD", s.logprob_threshold);
     s.no_speech_threshold = get_float("STT_WHISPER_SERVICE_NO_SPEECH_THRESHOLD", s.no_speech_threshold);
+
+    s.sample_rate = get_int("STT_WHISPER_SERVICE_SAMPLE_RATE", s.sample_rate);
+    
+    // [YENİ]: Çevresel değişkenden oku
+    s.stream_buffer_samples = get_int("STT_WHISPER_SERVICE_STREAM_BUFFER_SAMPLES", s.stream_buffer_samples);
 
     s.log_level = get_env("STT_WHISPER_SERVICE_LOG_LEVEL", s.log_level);
     s.grpc_ca_path = get_env("GRPC_TLS_CA_PATH", s.grpc_ca_path);

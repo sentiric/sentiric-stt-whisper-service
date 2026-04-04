@@ -88,6 +88,9 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     bool is_first_chunk = true; 
     bool is_wav_container = false; 
     size_t wav_header_skip = 0;
+
+    // [ARCH-COMPLIANCE] Hardcode kaldırıldı, ENV üzerinden dinamik boyut
+    const size_t DYNAMIC_BUFFER_SIZE = engine_->get_settings().stream_buffer_samples;    
     
     while (stream->Read(&request)) {
         if (context->IsCancelled()) return grpc::Status::CANCELLED;
@@ -121,7 +124,8 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
             std::memcpy(buffer.data() + current_size, data_ptr, samples * 2);
         }
 
-        if (buffer.size() > 24000) {
+        // ESKİ: if (buffer.size() > 24000) {
+        if (buffer.size() > DYNAMIC_BUFFER_SIZE) {
              SUTS_DEBUG("STT_BUFFER_PROCESSING", trace_id, span_id, tenant_id, "⚡ Processing buffered chunk ({} samples)...", buffer.size());
              
              RequestOptions options;
