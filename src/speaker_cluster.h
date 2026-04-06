@@ -11,9 +11,11 @@ struct SpeakerCluster {
 
 class SpeakerClusterer {
 public:
-    SpeakerClusterer(float threshold = 0.85f); // cosine threshold
+    // [ARCH-COMPLIANCE FIX]: Eşik 0.85'ten 0.88'e çıkarıldı (Matematik düzeltildiği için daha keskin eşleşme arıyoruz ama toleranslı)
+    SpeakerClusterer(float threshold = 0.88f); // cosine threshold
     std::string assign_or_add(const std::vector<float>& vec);
     const std::unordered_map<std::string, SpeakerCluster>& clusters() const { return clusters_; }
+
 private:
     float threshold_;
     std::unordered_map<std::string, SpeakerCluster> clusters_;

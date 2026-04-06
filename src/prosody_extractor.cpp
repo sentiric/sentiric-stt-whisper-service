@@ -141,21 +141,31 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples, int sampl
     // Çözüm: Cinsiyete göre Pitch vektörünü yapay olarak uzaklaştırıyoruz.
     // M -> [0.0, 0.4], F -> [0.6, 1.0]
     // Bu sayede Cosine Similarity düşecek ve yeni Cluster açılacak.    
+  
+  
+    // ESKİ HATA: Hard IF/ELSE cinsiyet ayrımı, duygusal sıçramalarda kimlik bölüyordu.
+    // YENİ ÇÖZÜM: Spectral Centroid (Tını) ağırlıklı sürekli (continuous) haritalama.
+    
     out.speaker_vec.resize(8);
     
-    if (out.gender_proxy == "M") {
-        out.speaker_vec[0] = soft_norm(out.pitch_mean, 50.0f, 250.0f) * 0.4f; 
-    } else {
-        out.speaker_vec[0] = 0.6f + (soft_norm(out.pitch_mean, 150.0f, 350.0f) * 0.4f);
-    }
+    // 1. Temel Ses İmzası (Pitch) - Yumuşatılmış geçiş
+    float base_pitch_norm = soft_norm(out.pitch_mean, 60.0f, 350.0f);
+    out.speaker_vec[0] = base_pitch_norm; 
 
-    out.speaker_vec[1] = soft_norm(out.pitch_std, 5.0f, 100.0f);         
-    out.speaker_vec[2] = soft_norm(out.energy_mean, 0.0f, 0.3f);        
-    out.speaker_vec[3] = soft_norm(out.spectral_centroid, 0.0f, 250.0f); 
+    // 2. Sesin Karakteri/Tınısı (Spectral Centroid) - Kimlik için en güvenilir metrik
+    // Kişi bağırsa da fısıldasa da tınısı kolay kolay değişmez.
+    out.speaker_vec[1] = soft_norm(out.spectral_centroid, 40.0f, 250.0f);
+
+    // 3. Diğer dinamik özellikler (Duygu değişiminin kimliği bozmaması için ağırlıkları %50 düşürüldü)
+    out.speaker_vec[2] = soft_norm(out.pitch_std, 5.0f, 100.0f) * 0.5f;         
+    out.speaker_vec[3] = soft_norm(out.energy_mean, 0.0f, 0.3f) * 0.5f;        
     out.speaker_vec[4] = soft_norm(out.zero_crossing_rate, 0.0f, 0.5f); 
-    out.speaker_vec[5] = soft_norm(speech_rate, 1.0f, 12.0f);           
-    out.speaker_vec[6] = out.arousal;                                   
-    out.speaker_vec[7] = (out.valence + 1.0f) / 2.0f;                   
+    out.speaker_vec[5] = soft_norm(speech_rate, 1.0f, 12.0f) * 0.5f;           
+    
+    // 4. Arousal ve Valence (Duygu) kimlik vektörünü ÇOK FAZLA etkilememeli! 
+    // Aksi halde "Deep Waters" moduna giren kullanıcı başka biri sanılır. Etkisini %20'ye düşürüyoruz.
+    out.speaker_vec[6] = out.arousal * 0.2f;                                   
+    out.speaker_vec[7] = ((out.valence + 1.0f) / 2.0f) * 0.2f;                   
 
     return out;
 }
