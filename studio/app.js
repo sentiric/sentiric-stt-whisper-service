@@ -39,21 +39,18 @@ class SystemMonitor {
     resize() { if(this.canvas) { this.canvas.width = this.canvas.parentElement.offsetWidth; this.canvas.height = 60; } }
     async startPolling() {
         setInterval(async () => {
-            // Eğer sürekli hata alıyorsak (CORS vb.) polling'i yavaşlat veya durdur
             if (this.failCount > 10) return; 
-
             try {
-                // Fetch modunu cors olarak belirttik ve hata yakalamayı iyileştirdik
                 const r = await fetch(`${window.location.protocol}//${document.domain}:15032/metrics`, { mode: 'cors' });
                 if (!r.ok) throw new Error("Metrics endpoint unavailable");
                 const text = await r.text();
                 this.parseAndRender(text);
-                this.failCount = 0; // Başarılıysa sayacı sıfırla
+                this.failCount = 0;
             } catch (e) { 
                 this.failCount++;
                 if (this.failCount === 1) console.warn("Metrics Monitor Connection Lost (Check CORS/Port 15032)");
             }
-        }, 1000);
+        }, 60000);
     }
     parseAndRender(text) {
         const getVal = (k) => { const m = text.match(new RegExp(`${k} ([0-9.]+)`)); return m ? parseFloat(m[1]) : 0; };
@@ -127,7 +124,7 @@ class SpeakerSystem {
 const Speaker = new SpeakerSystem();
 
 // =============================================================================
-// 🎹 AUDIO ENGINE (CRITICAL FIX APPLIED)
+// 🎹 AUDIO ENGINE
 // =============================================================================
 const AudioSys = {
     ctx: null, analyser: null, script: null, 
@@ -136,14 +133,10 @@ const AudioSys = {
 
     async init() {
         if(this.ctx) return true;
-
-        // 🛡️ SECURITY CHECK: Tarayıcı mikrofonu engelliyor mu?
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
             const isHttps = location.protocol === 'https:';
-            
             let errorMsg = "Tarayıcınız ses cihazlarına erişimi desteklemiyor.";
-            
             if (!isHttps && !isLocal) {
                 errorMsg = "🛑 GÜVENLİK HATASI: Mikrofon erişimi için site HTTPS üzerinden çalışmalıdır! Şu an HTTP kullanıyorsunuz.";
                 console.error("AudioSys Security:", "getUserMedia is blocked on non-secure (HTTP) contexts.");
@@ -152,7 +145,6 @@ const AudioSys = {
                 return false;
             }
         }
-
         try {
             this.ctx = new (window.AudioContext || window.webkitAudioContext)();
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -241,7 +233,6 @@ const UI = {
         
         if(!$('#promptInput').value) this.setTemplate('general');
         
-        // Initial Check Warning
         if(location.protocol !== 'https:' && location.hostname !== 'localhost') {
             this.showToast("⚠️ DİKKAT: Güvenli olmayan bağlantı (HTTP). Mikrofon çalışmayabilir.");
         }
@@ -275,7 +266,7 @@ const UI = {
 
     async toggleRec() {
         const initialized = await AudioSys.init();
-        if(!initialized) return; // Init fail ettiyse başlama
+        if(!initialized) return;
 
         if(AudioSys.isRec) {
             AudioSys.isRec = false; clearInterval(AudioSys.timer); AudioSys.releaseWakeLock(); AudioSys.haptic([50, 50]);
@@ -308,16 +299,22 @@ const UI = {
 
     async sendAudio(blob, durMs) {
         const fd = new FormData();
-        fd.append('file', blob); fd.append('language', $('#langSelect').value);
-        fd.append('prompt', $('#promptInput').value); fd.append('temperature', $('#tempRange').value);
-        fd.append('prosody_lpf_alpha', $('#lpfRange').value); fd.append('prosody_pitch_gate', $('#pitchGateRange').value);
+        fd.append('file', blob);
+        fd.append('language', $('#langSelect').value);
+        fd.append('prompt', $('#promptInput').value);
+        fd.append('temperature', $('#tempRange').value);
+        fd.append('prosody_lpf_alpha', $('#lpfRange').value);
+        fd.append('prosody_pitch_gate', $('#pitchGateRange').value);
+        
+        // [ARCH-COMPLIANCE FIX]: Çeviri butonu durumunu API isteğine ekle
+        fd.append('translate', $('#translateToggle').checked);
+
         const tempId = this.showLoading();
         
         try {
             const t0 = Date.now(); 
             const r = await fetch('/v1/transcribe', { 
                 method: 'POST', 
-                // [ARCH-COMPLIANCE] Strict Tenant Isolation ve Tracing gereksinimleri
                 headers: {
                     'x-tenant-id': 'sentiric_studio',
                     'x-trace-id': 'ui-req-' + Date.now()
@@ -360,18 +357,17 @@ const UI = {
 
             const spk = Speaker.identify(seg.speaker_vec, {gender: seg.gender});
             
-            // [ARCH-COMPLIANCE FIX]: "Deep Waters" analizi için tüm akustik ve duygu verilerini dışa aktar
             this.conversationHistory.push({
                 speaker_name: spk.name,
                 speaker_id: spk.id,
                 start_time: this.globalTimeOffset + seg.start,
                 end_time: this.globalTimeOffset + seg.end,
                 text: seg.text,
-                gender: seg.gender,            // [EKLENDİ]
-                emotion: seg.emotion,          // [EKLENDİ]
-                arousal: seg.arousal,          // [EKLENDİ]
-                valence: seg.valence,          // [EKLENDİ]
-                speaker_vec: seg.speaker_vec,  // [EKLENDİ]
+                gender: seg.gender,
+                emotion: seg.emotion,
+                arousal: seg.arousal,
+                valence: seg.valence,
+                speaker_vec: seg.speaker_vec,
                 words: seg.words || []
             });
 
