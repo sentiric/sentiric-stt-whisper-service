@@ -1,20 +1,25 @@
-# Makefile for Service
+.PHONY: all setup check lint build clean test
 
-.PHONY: all setup check lint build clean
-
-# Commit öncesi yapılması gereken standart akış
-all: setup lint check
-
+all: setup clean lint build
 
 setup:
+	@echo "🛠️ Kalite araçları kontrol ediliyor..."
+	@command -v clang-format >/dev/null 2>&1 || { echo >&2 "clang-format eksik. Kuruluyor..."; sudo apt-get install -y clang-format; }
+	@command -v cmake >/dev/null 2>&1 || { echo >&2 "cmake eksik. Kuruluyor..."; sudo apt-get install -y cmake ninja-build; }
+	@if [ ! -f .clang-format ]; then echo "BasedOnStyle: Google" > .clang-format; fi
 
-
-# 2. Check: Sadece hızlıca derleme kontrolü yapar
 check:
+	@echo "🔍 CMake Check başlatılıyor..."
 
-
-# 3. Lint: Hem kod stilini düzeltir hem de statik analiz yapar
 lint:
+	@echo "🧹 Linter (clang-format) çalıştırılıyor..."
+	find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i -style=file
 
+build: check
+	@echo "🏗️ Build alınıyor..."
+
+test:
+	@echo "🧪 E2E Testi Başlatılıyor..."
 
 clean:
+	@echo "🗑️ Eski build artıkları temizleniyor..."

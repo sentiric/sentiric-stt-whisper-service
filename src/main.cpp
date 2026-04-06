@@ -1,144 +1,176 @@
 // Dosya: src/main.cpp
-#include "config.h"
-#include "stt_engine.h"
-#include "grpc_server.h"
-#include "http_server.h"
-#include "model_manager.h" 
-#include "suts_logger.h"
-#include <thread>
-#include <memory>
-#include <csignal>
-#include <future>
-#include <fstream>
-#include <sstream>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
 #include <spdlog/sinks/stdout_sinks.h>
+
+#include <csignal>
+#include <fstream>
+#include <future>
+#include <memory>
+#include <sstream>
+#include <thread>
+
+#include "config.h"
+#include "grpc_server.h"
+#include "http_server.h"
+#include "model_manager.h"
+#include "stt_engine.h"
+#include "suts_logger.h"
 
 #ifndef APP_VERSION
 #define APP_VERSION "unknown"
 #endif
 
 namespace {
-    std::promise<void> shutdown_promise;
+std::promise<void> shutdown_promise;
 }
 
 void signal_handler(int signal) {
-    SUTS_WARN("SERVICE_SHUTDOWN", "", "", "", "🛑 Signal {} received. Initiating graceful shutdown...", signal);
-    try { shutdown_promise.set_value(); } catch (...) {}
+  SUTS_WARN("SERVICE_SHUTDOWN", "", "", "",
+            "🛑 Signal {} received. Initiating graceful shutdown...", signal);
+  try {
+    shutdown_promise.set_value();
+  } catch (...) {
+  }
 }
 
-void whisper_log_cb(ggml_log_level level, const char * text, void * user_data) {
-    (void)user_data;
-    std::string msg(text);
-    if (!msg.empty() && msg.back() == '\n') msg.pop_back();
-    switch(level) {
-        case GGML_LOG_LEVEL_ERROR: SUTS_ERROR("WHISPER_CPP_ERROR", "", "", "", "[whisper] {}", msg); break;
-        case GGML_LOG_LEVEL_WARN: SUTS_WARN("WHISPER_CPP_WARN", "", "", "", "[whisper] {}", msg); break;
-        case GGML_LOG_LEVEL_INFO: SUTS_DEBUG("WHISPER_CPP_INFO", "", "", "", "[whisper] {}", msg); break;
-        default: SUTS_DEBUG("WHISPER_CPP_DEBUG", "", "", "", "[whisper] {}", msg); break;
-    }
+void whisper_log_cb(ggml_log_level level, const char* text, void* user_data) {
+  (void)user_data;
+  std::string msg(text);
+  if (!msg.empty() && msg.back() == '\n') msg.pop_back();
+  switch (level) {
+    case GGML_LOG_LEVEL_ERROR:
+      SUTS_ERROR("WHISPER_CPP_ERROR", "", "", "", "[whisper] {}", msg);
+      break;
+    case GGML_LOG_LEVEL_WARN:
+      SUTS_WARN("WHISPER_CPP_WARN", "", "", "", "[whisper] {}", msg);
+      break;
+    case GGML_LOG_LEVEL_INFO:
+      SUTS_DEBUG("WHISPER_CPP_INFO", "", "", "", "[whisper] {}", msg);
+      break;
+    default:
+      SUTS_DEBUG("WHISPER_CPP_DEBUG", "", "", "", "[whisper] {}", msg);
+      break;
+  }
 }
 
 std::string read_file(const std::string& filepath) {
-    std::ifstream file(filepath);
-    if (!file.is_open()) throw std::runtime_error("File not found: " + filepath);
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
+  std::ifstream file(filepath);
+  if (!file.is_open()) throw std::runtime_error("File not found: " + filepath);
+  std::stringstream buffer;
+  buffer << file.rdbuf();
+  return buffer.str();
 }
 
 int main() {
-    auto sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
-    sink->set_formatter(std::make_unique<suts::SutsFormatter>());
-    auto console = std::make_shared<spdlog::logger>("stt-whisper-service", sink);
-    spdlog::set_default_logger(console);
-    
-    whisper_log_set(whisper_log_cb, nullptr);
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+  auto sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
+  sink->set_formatter(std::make_unique<suts::SutsFormatter>());
+  auto console = std::make_shared<spdlog::logger>("stt-whisper-service", sink);
+  spdlog::set_default_logger(console);
 
-    auto settings = load_settings();
-    spdlog::set_level(spdlog::level::from_str(settings.log_level));
-    
-    SUTS_INFO("SERVICE_START", "", "", "", "🚀 Sentiric STT Whisper Service (C++) Starting... v{}", APP_VERSION);
-    SUTS_INFO("SERVICE_CONFIGURED", "", "", "", "Config: Model={}, Threads={}", settings.model_filename, settings.n_threads);
+  whisper_log_set(whisper_log_cb, nullptr);
+  signal(SIGINT, signal_handler);
+  signal(SIGTERM, signal_handler);
 
-    try {
-        SUTS_INFO("MODEL_CHECK", "", "", "", "📦 Checking models...");
-        ModelManager::ensure_model(settings);
-        if (settings.enable_vad) {
-            ModelManager::ensure_vad_model(settings);
-        }
-    } catch (const std::exception& e) {
-        SUTS_ERROR("MODEL_LOAD_FAIL", "", "", "", "Model provisioning failed: {}", e.what());
-        return 1;
+  auto settings = load_settings();
+  spdlog::set_level(spdlog::level::from_str(settings.log_level));
+
+  SUTS_INFO("SERVICE_START", "", "", "",
+            "🚀 Sentiric STT Whisper Service (C++) Starting... v{}",
+            APP_VERSION);
+  SUTS_INFO("SERVICE_CONFIGURED", "", "", "", "Config: Model={}, Threads={}",
+            settings.model_filename, settings.n_threads);
+
+  try {
+    SUTS_INFO("MODEL_CHECK", "", "", "", "📦 Checking models...");
+    ModelManager::ensure_model(settings);
+    if (settings.enable_vad) {
+      ModelManager::ensure_vad_model(settings);
+    }
+  } catch (const std::exception& e) {
+    SUTS_ERROR("MODEL_LOAD_FAIL", "", "", "", "Model provisioning failed: {}",
+               e.what());
+    return 1;
+  }
+
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto& req_total = prometheus::BuildCounter()
+                        .Name("stt_requests_total")
+                        .Register(*registry)
+                        .Add({});
+
+  prometheus::Histogram::BucketBoundaries buckets{0.1, 0.5,  1.0,
+                                                  5.0, 10.0, 30.0};
+  auto& req_latency = prometheus::BuildHistogram()
+                          .Name("stt_request_latency_seconds")
+                          .Register(*registry)
+                          .Add({}, buckets);
+
+  auto& audio_sec = prometheus::BuildCounter()
+                        .Name("stt_audio_seconds_processed_total")
+                        .Register(*registry)
+                        .Add({});
+  auto& tokens_gen = prometheus::BuildCounter()
+                         .Name("stt_tokens_generated_total")
+                         .Register(*registry)
+                         .Add({});
+
+  AppMetrics metrics = {req_total, req_latency, audio_sec, tokens_gen};
+
+  try {
+    auto engine = std::make_shared<SttEngine>(settings);
+
+    grpc::EnableDefaultHealthCheckService(true);
+
+    GrpcServer grpc_service(engine, metrics);
+    grpc::ServerBuilder builder;
+
+    std::string grpc_addr =
+        settings.host + ":" + std::to_string(settings.grpc_port);
+
+    if (settings.grpc_ca_path.empty()) {
+      builder.AddListeningPort(grpc_addr, grpc::InsecureServerCredentials());
+      SUTS_WARN("TLS_INSECURE_MODE", "", "", "",
+                "gRPC listening on {} (INSECURE)", grpc_addr);
+    } else {
+      std::string root = read_file(settings.grpc_ca_path);
+      std::string cert = read_file(settings.grpc_cert_path);
+      std::string key = read_file(settings.grpc_key_path);
+      grpc::SslServerCredentialsOptions::PemKeyCertPair pkcp = {key, cert};
+      grpc::SslServerCredentialsOptions ssl_opts;
+      ssl_opts.pem_root_certs = root;
+      ssl_opts.pem_key_cert_pairs.push_back(pkcp);
+      builder.AddListeningPort(grpc_addr, grpc::SslServerCredentials(ssl_opts));
+      SUTS_INFO("TLS_CONFIGURED", "", "", "",
+                "gRPC listening on {} (mTLS Enabled)", grpc_addr);
     }
 
-    auto registry = std::make_shared<prometheus::Registry>();
-    auto& req_total = prometheus::BuildCounter().Name("stt_requests_total").Register(*registry).Add({});
-    
-    prometheus::Histogram::BucketBoundaries buckets{0.1, 0.5, 1.0, 5.0, 10.0, 30.0};
-    auto& req_latency = prometheus::BuildHistogram()
-                            .Name("stt_request_latency_seconds")
-                            .Register(*registry)
-                            .Add({}, buckets);
+    builder.RegisterService(&grpc_service);
+    std::unique_ptr<grpc::Server> grpc_server = builder.BuildAndStart();
 
-    auto& audio_sec = prometheus::BuildCounter().Name("stt_audio_seconds_processed_total").Register(*registry).Add({});
-    auto& tokens_gen = prometheus::BuildCounter().Name("stt_tokens_generated_total").Register(*registry).Add({});
-    
-    AppMetrics metrics = {req_total, req_latency, audio_sec, tokens_gen};
+    HttpServer http_server(engine, metrics, settings.host, settings.http_port);
+    MetricsServer metrics_server(settings.host, settings.metrics_port,
+                                 *registry);
 
-    try {
-        auto engine = std::make_shared<SttEngine>(settings);
+    std::thread http_thread([&]() { http_server.run(); });
+    std::thread metrics_thread([&]() { metrics_server.run(); });
 
-        grpc::EnableDefaultHealthCheckService(true);
-        
-        GrpcServer grpc_service(engine, metrics);
-        grpc::ServerBuilder builder;
-        
-        std::string grpc_addr = settings.host + ":" + std::to_string(settings.grpc_port);
-        
-        if (settings.grpc_ca_path.empty()) {
-            builder.AddListeningPort(grpc_addr, grpc::InsecureServerCredentials());
-            SUTS_WARN("TLS_INSECURE_MODE", "", "", "", "gRPC listening on {} (INSECURE)", grpc_addr);
-        } else {
-            std::string root = read_file(settings.grpc_ca_path);
-            std::string cert = read_file(settings.grpc_cert_path);
-            std::string key = read_file(settings.grpc_key_path);
-            grpc::SslServerCredentialsOptions::PemKeyCertPair pkcp = {key, cert};
-            grpc::SslServerCredentialsOptions ssl_opts;
-            ssl_opts.pem_root_certs = root;
-            ssl_opts.pem_key_cert_pairs.push_back(pkcp);
-            builder.AddListeningPort(grpc_addr, grpc::SslServerCredentials(ssl_opts));
-            SUTS_INFO("TLS_CONFIGURED", "", "", "", "gRPC listening on {} (mTLS Enabled)", grpc_addr);
-        }
+    SUTS_INFO("ALL_SERVERS_READY", "", "", "", "✅ Service Ready!");
 
-        builder.RegisterService(&grpc_service);
-        std::unique_ptr<grpc::Server> grpc_server = builder.BuildAndStart();
+    shutdown_promise.get_future().wait();
 
-        HttpServer http_server(engine, metrics, settings.host, settings.http_port);
-        MetricsServer metrics_server(settings.host, settings.metrics_port, *registry);
+    SUTS_INFO("SERVER_STOPPING", "", "", "", "Stopping servers...");
+    grpc_server->Shutdown();
+    http_server.stop();
+    metrics_server.stop();
 
-        std::thread http_thread([&](){ http_server.run(); });
-        std::thread metrics_thread([&](){ metrics_server.run(); });
-        
-        SUTS_INFO("ALL_SERVERS_READY", "", "", "", "✅ Service Ready!");
+    if (http_thread.joinable()) http_thread.join();
+    if (metrics_thread.joinable()) metrics_thread.join();
 
-        shutdown_promise.get_future().wait();
-        
-        SUTS_INFO("SERVER_STOPPING", "", "", "", "Stopping servers...");
-        grpc_server->Shutdown();
-        http_server.stop();
-        metrics_server.stop();
-        
-        if(http_thread.joinable()) http_thread.join();
-        if(metrics_thread.joinable()) metrics_thread.join();
+  } catch (const std::exception& e) {
+    SUTS_ERROR("SERVICE_CRASH", "", "", "", "Fatal error: {}", e.what());
+    return 1;
+  }
 
-    } catch (const std::exception& e) {
-        SUTS_ERROR("SERVICE_CRASH", "", "", "", "Fatal error: {}", e.what());
-        return 1;
-    }
-
-    return 0;
+  return 0;
 }
