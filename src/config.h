@@ -59,9 +59,10 @@ struct Settings {
     bool flash_attn = true;
     bool suppress_nst = true; 
     
-    // [ARCH-COMPLIANCE FIX]: Diarization toleransı artırıldı (0.94 -> 0.88)
+    // [ARCH-COMPLIANCE FIX]: Diarization toleransı artırıldı (0.94 -> 0.85)
     bool enable_diarization = false; 
-    float cluster_threshold = 0.88f; 
+    // clusterRange için varsayılan 0.94 çok sıkıydı, özellikle gürültülü ortamlarda. 0.85 ile daha esnek ve gerçekçi sonuçlar alınabilir.
+    float cluster_threshold = 0.85f; 
 
     int sample_rate = 16000;
 

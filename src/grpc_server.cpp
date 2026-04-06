@@ -95,7 +95,6 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     if (auto it = metadata.find("x-tenant-id"); it != metadata.end()) tenant_id = std::string(it->second.data(), it->second.length());
 
     if (tenant_id == "unknown" || tenant_id.empty()) {
-        SUTS_ERROR("MISSING_TENANT_ID", trace_id, span_id, tenant_id, "Tenant ID is missing in gRPC metadata. Request rejected.");
         return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "tenant_id is strictly required for isolation");
     }
 
@@ -107,20 +106,64 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     sentiric::stt::v1::WhisperTranscribeStreamRequest request;
     std::vector<int16_t> buffer;
     
-    const size_t MAX_BUFFER_SIZE = 16000 * 30; 
-    const size_t VAD_WINDOW = 16000 * 1;       
+    // [YENİ MİMARİ]: Kesintisiz tampon yönetimi
+    size_t last_processed_size = 0;
+    const size_t DYNAMIC_BUFFER_SIZE = engine_->get_settings().stream_buffer_samples;    
+    const size_t MAX_BUFFER_SIZE = 16000 * 30; // 30 Saniye maksimum sınır
     
     bool is_first_chunk = true; 
     bool is_wav_container = false; 
     size_t wav_header_skip = 0;
 
-    const size_t DYNAMIC_BUFFER_SIZE = engine_->get_settings().stream_buffer_samples;    
-    
     while (stream->Read(&request)) {
         if (context->IsCancelled()) return grpc::Status::CANCELLED;
 
         const std::string& chunk = request.audio_chunk();
-        if (chunk.empty()) continue;
+        
+        // [YENİ]: EOS SİNYALİ (İstemci Sustuğunda Tetiklenir)
+        if (chunk.empty()) {
+            if (!buffer.empty()) {
+                 SUTS_DEBUG("STT_EOS_RECEIVED", trace_id, span_id, tenant_id, "EOS signal received. Finalizing {} samples.", buffer.size());
+                 RequestOptions options;
+                 auto results = engine_->transcribe_pcm16(buffer, 16000, options);
+                 for (const auto& res : results) {
+                     if (!res.text.empty()) {
+                         sentiric::stt::v1::WhisperTranscribeStreamResponse response;
+                         response.set_transcription(res.text);
+                         // [KRİTİK]: Cümle Bitti!
+                         response.set_is_final(true); 
+                         
+                         const auto& aff = res.affective;
+                         response.set_gender_proxy(aff.gender_proxy);
+                         response.set_emotion_proxy(aff.emotion_proxy);
+                         response.set_arousal(aff.arousal);
+                         response.set_valence(aff.valence);
+                         response.set_pitch_mean(aff.pitch_mean);
+                         response.set_pitch_std(aff.pitch_std);
+                         response.set_energy_mean(aff.energy_mean);
+                         response.set_energy_std(aff.energy_std);
+                         response.set_spectral_centroid(aff.spectral_centroid);
+                         response.set_zero_crossing_rate(aff.zero_crossing_rate);
+                         for (float v : aff.speaker_vec) response.add_speaker_vec(v);
+                         response.set_speaker_id(res.speaker_id);
+                         
+                         for (const auto& token : res.tokens) {
+                             auto* word_data = response.add_words();
+                             word_data->set_word(token.text);
+                             word_data->set_start(static_cast<float>(token.t0) / 100.0f);
+                             word_data->set_end(static_cast<float>(token.t1) / 100.0f);
+                             word_data->set_probability(token.p);
+                         }
+                         stream->Write(response);
+                         SUTS_INFO("STT_TRANSCRIPT_FINALIZED", trace_id, span_id, tenant_id, "✅ Final Sentence: '{}' [Spk: {}]", res.text, res.speaker_id);
+                     }
+                 }
+                 // Cümle bitince yeni cümle için tamponu sıfırla
+                 buffer.clear();
+                 last_processed_size = 0;
+            }
+            continue;
+        }
 
         const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(chunk.data());
         size_t data_len = chunk.size();
@@ -134,11 +177,8 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
         }
         
         if (is_wav_container && wav_header_skip > 0) {
-            if (data_len >= wav_header_skip) { 
-                data_ptr += wav_header_skip; data_len -= wav_header_skip; wav_header_skip = 0; 
-            } else { 
-                wav_header_skip -= data_len; data_len = 0; 
-            }
+            if (data_len >= wav_header_skip) { data_ptr += wav_header_skip; data_len -= wav_header_skip; wav_header_skip = 0; } 
+            else { wav_header_skip -= data_len; data_len = 0; }
         }
 
         if (data_len > 0) {
@@ -148,26 +188,25 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
             std::memcpy(buffer.data() + current_size, data_ptr, samples * 2);
         }
 
-        if (buffer.size() > DYNAMIC_BUFFER_SIZE) {
-             SUTS_DEBUG("STT_BUFFER_PROCESSING", trace_id, span_id, tenant_id, "⚡ Processing buffered chunk ({} samples)...", buffer.size());
-             
+        // [YENİ]: TAMPONU TEMİZLEMEDEN (Partial) İŞLEME
+        if (buffer.size() - last_processed_size >= DYNAMIC_BUFFER_SIZE) {
              RequestOptions options;
              SttEngine::PerformanceMetrics perf;
              
              try {
                  auto results = engine_->transcribe_pcm16(buffer, 16000, options, &perf);
+                 last_processed_size = buffer.size(); // Sadece işlenen imleci kaydır, temizleme!
                  
                  for (const auto& res : results) {
                      if (!res.text.empty()) {
                          sentiric::stt::v1::WhisperTranscribeStreamResponse response;
                          response.set_transcription(res.text);
-                         response.set_is_final(true);
+                         // [KRİTİK]: Cümle henüz bitmedi! (Yazıyor efekti)
+                         response.set_is_final(false); 
                          
                          const auto& aff = res.affective;
                          response.set_gender_proxy(aff.gender_proxy);
                          response.set_emotion_proxy(aff.emotion_proxy);
-                         
-                         // [ARCH-COMPLIANCE FIX]: Zengin Streaming Yüklemesi
                          response.set_arousal(aff.arousal);
                          response.set_valence(aff.valence);
                          response.set_pitch_mean(aff.pitch_mean);
@@ -176,11 +215,7 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
                          response.set_energy_std(aff.energy_std);
                          response.set_spectral_centroid(aff.spectral_centroid);
                          response.set_zero_crossing_rate(aff.zero_crossing_rate);
-                         
-                         for (float v : aff.speaker_vec) {
-                             response.add_speaker_vec(v);
-                         }
-                         
+                         for (float v : aff.speaker_vec) response.add_speaker_vec(v);
                          response.set_speaker_id(res.speaker_id);
                          
                          for (const auto& token : res.tokens) {
@@ -192,61 +227,22 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
                          }
                          
                          if (!stream->Write(response)) {
-                             SUTS_WARN("CLIENT_DISCONNECTED", trace_id, span_id, tenant_id, "Failed to write to stream, client likely disconnected.");
                              return grpc::Status::OK; 
                          }
-                         SUTS_INFO("STT_TRANSCRIPT_SENT", trace_id, span_id, tenant_id, "📤 Sent Transcript: '{}' [Spk: {}]", res.text, res.speaker_id);
                      }
                  }
                  
-                 buffer.clear();
+                 // OOM Koruması
+                 if (buffer.size() > MAX_BUFFER_SIZE) {
+                     buffer.clear();
+                     last_processed_size = 0;
+                     SUTS_WARN("STT_BUFFER_OVERFLOW", trace_id, span_id, tenant_id, "Buffer exceeded 30s limit. Forcing flush.");
+                 }
                  
              } catch (const std::exception& e) {
-                 SUTS_ERROR("STT_STREAM_ERROR", trace_id, span_id, tenant_id, "Streaming transcribe error: {}", e.what());
+                 SUTS_ERROR("STT_STREAM_ERROR", trace_id, span_id, tenant_id, "Streaming error: {}", e.what());
              }
         }
-    }
-    
-    // Akış bitiminde kalanları flush et
-    if (!buffer.empty()) {
-         SUTS_DEBUG("STT_FLUSHING_BUFFER", trace_id, span_id, tenant_id, "Processing remaining {} samples...", buffer.size());
-         RequestOptions options;
-         auto results = engine_->transcribe_pcm16(buffer, 16000, options);
-         for (const auto& res : results) {
-             if (!res.text.empty()) {
-                 sentiric::stt::v1::WhisperTranscribeStreamResponse response;
-                 response.set_transcription(res.text);
-                 response.set_is_final(true);
-                 
-                 const auto& aff = res.affective;
-                 response.set_gender_proxy(aff.gender_proxy);
-                 response.set_emotion_proxy(aff.emotion_proxy);
-                 response.set_arousal(aff.arousal);
-                 response.set_valence(aff.valence);
-                 response.set_pitch_mean(aff.pitch_mean);
-                 response.set_pitch_std(aff.pitch_std);
-                 response.set_energy_mean(aff.energy_mean);
-                 response.set_energy_std(aff.energy_std);
-                 response.set_spectral_centroid(aff.spectral_centroid);
-                 response.set_zero_crossing_rate(aff.zero_crossing_rate);
-                 
-                 for (float v : aff.speaker_vec) {
-                     response.add_speaker_vec(v);
-                 }
-                 
-                 response.set_speaker_id(res.speaker_id);
-                 
-                 for (const auto& token : res.tokens) {
-                     auto* word_data = response.add_words();
-                     word_data->set_word(token.text);
-                     word_data->set_start(static_cast<float>(token.t0) / 100.0f);
-                     word_data->set_end(static_cast<float>(token.t1) / 100.0f);
-                     word_data->set_probability(token.p);
-                 }
-                 
-                 stream->Write(response);
-             }
-         }
     }
     
     SUTS_INFO("STT_STREAM_COMPLETED", trace_id, span_id, tenant_id, "✅ gRPC Stream Connection closed cleanly.");

@@ -223,7 +223,7 @@ const UI = {
         this.bind('#tempRange', '#tempDisplay', 'stt_temp', "0.0");
         this.bind('#lpfRange', '#lpfDisplay', 'stt_lpf', "0.05");
         this.bind('#pitchGateRange', '#pitchGateDisplay', 'stt_pitch_gate', "170");
-        this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', "0.94", (v) => Speaker.setThreshold(v)); 
+        this.bind('#clusterRange', '#clusterDisplay', 'stt_cluster', "0.85", (v) => Speaker.setThreshold(v)); 
         this.bind('#vadThRange', '#vadThDisplay', 'stt_vad_th', "0.02", (v) => AudioSys.vadThreshold = parseFloat(v));
         this.bind('#vadPauseRange', '#vadPauseDisplay', 'stt_vad_pause', "1500", (v) => AudioSys.vadPauseTime = parseInt(v));
 
