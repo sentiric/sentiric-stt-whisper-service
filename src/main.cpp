@@ -4,7 +4,7 @@
 #include "grpc_server.h"
 #include "http_server.h"
 #include "model_manager.h" 
-#include "suts_logger.h" // [YENİ]
+#include "suts_logger.h"
 #include <thread>
 #include <memory>
 #include <csignal>
@@ -13,7 +13,11 @@
 #include <sstream>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
-#include <spdlog/sinks/stdout_sinks.h> //[ARCH-COMPLIANCE] Renksiz (JSON uyumlu)
+#include <spdlog/sinks/stdout_sinks.h>
+
+#ifndef APP_VERSION
+#define APP_VERSION "unknown"
+#endif
 
 namespace {
     std::promise<void> shutdown_promise;
@@ -45,7 +49,6 @@ std::string read_file(const std::string& filepath) {
 }
 
 int main() {
-    // [ARCH-COMPLIANCE] SUTS v4.0 Formatter Kurulumu
     auto sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
     sink->set_formatter(std::make_unique<suts::SutsFormatter>());
     auto console = std::make_shared<spdlog::logger>("stt-whisper-service", sink);
@@ -58,7 +61,7 @@ int main() {
     auto settings = load_settings();
     spdlog::set_level(spdlog::level::from_str(settings.log_level));
     
-    SUTS_INFO("SERVICE_START", "", "", "", "🚀 Sentiric STT Whisper Service (C++) Starting...v2.5.5");
+    SUTS_INFO("SERVICE_START", "", "", "", "🚀 Sentiric STT Whisper Service (C++) Starting... v{}", APP_VERSION);
     SUTS_INFO("SERVICE_CONFIGURED", "", "", "", "Config: Model={}, Threads={}", settings.model_filename, settings.n_threads);
 
     try {

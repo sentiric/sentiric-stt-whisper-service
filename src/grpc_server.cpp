@@ -1,7 +1,7 @@
 // Dosya: src/grpc_server.cpp
 #include "grpc_server.h"
 #include "utils.h"
-#include "suts_logger.h" // [YENİ]
+#include "suts_logger.h"
 #include <chrono>
 #include <vector>
 #include <cstring>
@@ -24,7 +24,6 @@ grpc::Status GrpcServer::WhisperTranscribe(
     if (auto it = metadata.find("x-span-id"); it != metadata.end()) span_id = std::string(it->second.data(), it->second.length());
     if (auto it = metadata.find("x-tenant-id"); it != metadata.end()) tenant_id = std::string(it->second.data(), it->second.length());
 
-    // [ARCH-COMPLIANCE] Strict Tenant Isolation Fail-Fast
     if (tenant_id == "unknown" || tenant_id.empty()) {
         SUTS_ERROR("MISSING_TENANT_ID", trace_id, span_id, tenant_id, "Tenant ID is missing in gRPC metadata. Request rejected.");
         return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "tenant_id is strictly required for isolation");
@@ -51,6 +50,33 @@ grpc::Status GrpcServer::WhisperTranscribe(
     if (!results.empty()) {
         response->set_transcription(results[0].text);
         response->set_language(results[0].language);
+        
+        // [ARCH-COMPLIANCE FIX]: Zengin Veri Yüklemesi
+        const auto& aff = results[0].affective;
+        response->set_gender_proxy(aff.gender_proxy);
+        response->set_emotion_proxy(aff.emotion_proxy);
+        response->set_arousal(aff.arousal);
+        response->set_valence(aff.valence);
+        response->set_pitch_mean(aff.pitch_mean);
+        response->set_pitch_std(aff.pitch_std);
+        response->set_energy_mean(aff.energy_mean);
+        response->set_energy_std(aff.energy_std);
+        response->set_spectral_centroid(aff.spectral_centroid);
+        response->set_zero_crossing_rate(aff.zero_crossing_rate);
+        
+        for (float v : aff.speaker_vec) {
+            response->add_speaker_vec(v);
+        }
+        
+        response->set_speaker_id(results[0].speaker_id);
+        
+        for (const auto& token : results[0].tokens) {
+            auto* word_data = response->add_words();
+            word_data->set_word(token.text);
+            word_data->set_start(static_cast<float>(token.t0) / 100.0f);
+            word_data->set_end(static_cast<float>(token.t1) / 100.0f);
+            word_data->set_probability(token.p);
+        }
     }
     
     SUTS_INFO("STT_UNARY_COMPLETE", trace_id, span_id, tenant_id, "✅ Unary transcription completed.");
@@ -68,7 +94,6 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     if (auto it = metadata.find("x-span-id"); it != metadata.end()) span_id = std::string(it->second.data(), it->second.length());
     if (auto it = metadata.find("x-tenant-id"); it != metadata.end()) tenant_id = std::string(it->second.data(), it->second.length());
 
-    // [ARCH-COMPLIANCE] Strict Tenant Isolation Fail-Fast
     if (tenant_id == "unknown" || tenant_id.empty()) {
         SUTS_ERROR("MISSING_TENANT_ID", trace_id, span_id, tenant_id, "Tenant ID is missing in gRPC metadata. Request rejected.");
         return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "tenant_id is strictly required for isolation");
@@ -89,7 +114,6 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
     bool is_wav_container = false; 
     size_t wav_header_skip = 0;
 
-    // [ARCH-COMPLIANCE] Hardcode kaldırıldı, ENV üzerinden dinamik boyut
     const size_t DYNAMIC_BUFFER_SIZE = engine_->get_settings().stream_buffer_samples;    
     
     while (stream->Read(&request)) {
@@ -124,7 +148,6 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
             std::memcpy(buffer.data() + current_size, data_ptr, samples * 2);
         }
 
-        // ESKİ: if (buffer.size() > 24000) {
         if (buffer.size() > DYNAMIC_BUFFER_SIZE) {
              SUTS_DEBUG("STT_BUFFER_PROCESSING", trace_id, span_id, tenant_id, "⚡ Processing buffered chunk ({} samples)...", buffer.size());
              
@@ -144,11 +167,35 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
                          response.set_gender_proxy(aff.gender_proxy);
                          response.set_emotion_proxy(aff.emotion_proxy);
                          
+                         // [ARCH-COMPLIANCE FIX]: Zengin Streaming Yüklemesi
+                         response.set_arousal(aff.arousal);
+                         response.set_valence(aff.valence);
+                         response.set_pitch_mean(aff.pitch_mean);
+                         response.set_pitch_std(aff.pitch_std);
+                         response.set_energy_mean(aff.energy_mean);
+                         response.set_energy_std(aff.energy_std);
+                         response.set_spectral_centroid(aff.spectral_centroid);
+                         response.set_zero_crossing_rate(aff.zero_crossing_rate);
+                         
+                         for (float v : aff.speaker_vec) {
+                             response.add_speaker_vec(v);
+                         }
+                         
+                         response.set_speaker_id(res.speaker_id);
+                         
+                         for (const auto& token : res.tokens) {
+                             auto* word_data = response.add_words();
+                             word_data->set_word(token.text);
+                             word_data->set_start(static_cast<float>(token.t0) / 100.0f);
+                             word_data->set_end(static_cast<float>(token.t1) / 100.0f);
+                             word_data->set_probability(token.p);
+                         }
+                         
                          if (!stream->Write(response)) {
                              SUTS_WARN("CLIENT_DISCONNECTED", trace_id, span_id, tenant_id, "Failed to write to stream, client likely disconnected.");
                              return grpc::Status::OK; 
                          }
-                         SUTS_INFO("STT_TRANSCRIPT_SENT", trace_id, span_id, tenant_id, "📤 Sent Transcript: '{}'", res.text);
+                         SUTS_INFO("STT_TRANSCRIPT_SENT", trace_id, span_id, tenant_id, "📤 Sent Transcript: '{}' [Spk: {}]", res.text, res.speaker_id);
                      }
                  }
                  
@@ -160,6 +207,7 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
         }
     }
     
+    // Akış bitiminde kalanları flush et
     if (!buffer.empty()) {
          SUTS_DEBUG("STT_FLUSHING_BUFFER", trace_id, span_id, tenant_id, "Processing remaining {} samples...", buffer.size());
          RequestOptions options;
@@ -169,6 +217,33 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
                  sentiric::stt::v1::WhisperTranscribeStreamResponse response;
                  response.set_transcription(res.text);
                  response.set_is_final(true);
+                 
+                 const auto& aff = res.affective;
+                 response.set_gender_proxy(aff.gender_proxy);
+                 response.set_emotion_proxy(aff.emotion_proxy);
+                 response.set_arousal(aff.arousal);
+                 response.set_valence(aff.valence);
+                 response.set_pitch_mean(aff.pitch_mean);
+                 response.set_pitch_std(aff.pitch_std);
+                 response.set_energy_mean(aff.energy_mean);
+                 response.set_energy_std(aff.energy_std);
+                 response.set_spectral_centroid(aff.spectral_centroid);
+                 response.set_zero_crossing_rate(aff.zero_crossing_rate);
+                 
+                 for (float v : aff.speaker_vec) {
+                     response.add_speaker_vec(v);
+                 }
+                 
+                 response.set_speaker_id(res.speaker_id);
+                 
+                 for (const auto& token : res.tokens) {
+                     auto* word_data = response.add_words();
+                     word_data->set_word(token.text);
+                     word_data->set_start(static_cast<float>(token.t0) / 100.0f);
+                     word_data->set_end(static_cast<float>(token.t1) / 100.0f);
+                     word_data->set_probability(token.p);
+                 }
+                 
                  stream->Write(response);
              }
          }

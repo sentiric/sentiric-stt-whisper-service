@@ -1,11 +1,15 @@
 // Dosya: src/http_server.cpp
 #include "http_server.h"
 #include "utils.h"
-#include "suts_logger.h" // [YENİ]
+#include "suts_logger.h"
 #include "nlohmann/json.hpp"
 #include <prometheus/text_serializer.h>
 #include <sstream>
 #include <algorithm>
+
+#ifndef APP_VERSION
+#define APP_VERSION "unknown"
+#endif
 
 using json = nlohmann::json;
 using namespace sentiric::utils;
@@ -44,7 +48,7 @@ void HttpServer::setup_routes() {
     
     svr_.Get("/health",[this](const httplib::Request &, httplib::Response &res) {
         bool ready = engine_->is_ready();
-        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", "2.5.4"}, {"api_compatibility", "openai-whisper"} };
+        json response = { {"status", ready ? "healthy" : "unhealthy"}, {"model_ready", ready}, {"service", "sentiric-stt-whisper-service"}, {"version", APP_VERSION}, {"api_compatibility", "openai-whisper"} };
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(response.dump(), "application/json"); res.status = ready ? 200 : 503;
     });
@@ -60,7 +64,6 @@ void HttpServer::setup_routes() {
         if (span_id.empty()) span_id = "unknown";
         if (tenant_id.empty()) tenant_id = "unknown";
 
-        // [ARCH-COMPLIANCE] Strict Tenant Isolation Fail-Fast
         if (tenant_id == "unknown") {
             SUTS_ERROR("MISSING_TENANT_ID", trace_id, span_id, tenant_id, "Tenant ID is missing in HTTP headers. Request rejected.");
             res.status = 400; 

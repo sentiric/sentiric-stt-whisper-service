@@ -1,16 +1,22 @@
 cmake_minimum_required(VERSION 3.20)
 
+# --- MERKEZİ VERSİYON YÖNETİMİ ---
+set(APP_VERSION "2.6.0")
+
 # CUDA tespiti ve Proje Tanımı
 if(DEFINED GGML_CUDA AND GGML_CUDA)
-    project(stt-whisper-service CXX CUDA)
+    project(stt-whisper-service VERSION ${APP_VERSION} LANGUAGES CXX CUDA)
 else()
-    project(stt-whisper-service CXX)
+    project(stt-whisper-service VERSION ${APP_VERSION} LANGUAGES CXX)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Güvenlik ve Uyumluluk Bayrakları
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Wno-unused-function")
+
+# Tüm target'lar için APP_VERSION makrosunu tanımla
+add_compile_definitions(APP_VERSION="${APP_VERSION}")
 
 # --- MİMARİ DÜZELTME: PORTABILITY FIX ---
 set(GGML_NATIVE OFF CACHE BOOL "Disable native instruction set optimization for portability" FORCE)
@@ -51,7 +57,7 @@ include(FetchContent)
 FetchContent_Declare(
   sentiric_contracts
   GIT_REPOSITORY https://github.com/sentiric/sentiric-contracts.git
-  GIT_TAG v1.13.6
+  GIT_TAG v1.20.6  # [ARCH-COMPLIANCE FIX]: Son sürüme güncellendi
 )
 FetchContent_MakeAvailable(sentiric_contracts)
 

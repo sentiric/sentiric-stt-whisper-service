@@ -8,6 +8,10 @@
 #include <cstdlib>
 #include <ctime>
 
+#ifndef APP_VERSION
+#define APP_VERSION "unknown"
+#endif
+
 namespace suts {
     template <typename... Args>
     inline std::string build(const std::string& event, 
@@ -55,7 +59,7 @@ namespace suts {
             const char* host = std::getenv("HOSTNAME");
             j["resource"] = {
                 {"service.name", "stt-whisper-service"},
-                {"service.version", "2.5.4"},
+                {"service.version", APP_VERSION},
                 {"service.env", env_p ? env_p : "production"},
                 {"host.name", host ? host : "unknown"}
             };
