@@ -59,10 +59,11 @@ struct Settings {
     bool flash_attn = true;
     bool suppress_nst = true; 
     
+    // [ARCH-COMPLIANCE FIX]: Diarization toleransı artırıldı (0.94 -> 0.88)
     bool enable_diarization = false; 
-    float cluster_threshold = 0.94f; 
+    float cluster_threshold = 0.88f; 
 
-    int sample_rate = 16000; 
+    int sample_rate = 16000;
 
     // [YENİ]: Dinamik Stream Buffer Boyutu
     int stream_buffer_samples = 8000; // Varsayılan 500ms (16000 * 0.5)
