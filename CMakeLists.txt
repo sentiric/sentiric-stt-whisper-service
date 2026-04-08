@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 # --- MERKEZİ VERSİYON YÖNETİMİ ---
-set(APP_VERSION "2.6.3")
+set(APP_VERSION "2.6.4")
 
 # CUDA tespiti ve Proje Tanımı
 if(DEFINED GGML_CUDA AND GGML_CUDA)

@@ -1,4 +1,3 @@
-// Dosya: src/suts_logger.h
 #pragma once
 #include <fmt/core.h>
 
@@ -15,6 +14,47 @@
 #endif
 
 namespace suts {
+
+// [ARCH-COMPLIANCE FIX]: Task-09 UTF-8 Sanitization to prevent nlohmann::json
+// crash (DoS Protection)
+inline std::string sanitize_utf8(const std::string& str) {
+  std::string res;
+  res.reserve(str.size());
+  for (size_t i = 0; i < str.size();) {
+    unsigned char c = str[i];
+    int n = 0;
+    if (c < 0x80)
+      n = 1;
+    else if ((c & 0xE0) == 0xC0)
+      n = 2;
+    else if ((c & 0xF0) == 0xE0)
+      n = 3;
+    else if ((c & 0xF8) == 0xF0)
+      n = 4;
+    else {
+      i++;
+      continue;
+    }  // Geçersiz byte, atla
+
+    if (i + n > str.size()) break;
+
+    bool valid = true;
+    for (int j = 1; j < n; j++) {
+      if ((str[i + j] & 0xC0) != 0x80) {
+        valid = false;
+        break;
+      }
+    }
+    if (valid) {
+      res.append(str, i, n);
+      i += n;
+    } else {
+      i++;
+    }
+  }
+  return res;
+}
+
 template <typename... Args>
 inline std::string build(const std::string& event, const std::string& trace_id,
                          const std::string& span_id,
@@ -22,23 +62,36 @@ inline std::string build(const std::string& event, const std::string& trace_id,
                          fmt::format_string<Args...> fmt, Args&&... args) {
   nlohmann::json j;
   j["_is_suts"] = true;
-  j["event"] = event;
+  j["event"] = sanitize_utf8(event);
 
   if (trace_id.empty() || trace_id == "unknown")
     j["trace_id"] = nullptr;
   else
-    j["trace_id"] = trace_id;
+    j["trace_id"] = sanitize_utf8(trace_id);
+
   if (span_id.empty() || span_id == "unknown")
     j["span_id"] = nullptr;
   else
-    j["span_id"] = span_id;
+    j["span_id"] = sanitize_utf8(span_id);
+
   if (tenant_id.empty() || tenant_id == "unknown")
     j["tenant_id"] = nullptr;
   else
-    j["tenant_id"] = tenant_id;
+    j["tenant_id"] = sanitize_utf8(tenant_id);
 
-  j["message"] = fmt::format(fmt, std::forward<Args>(args)...);
-  return j.dump();
+  try {
+    j["message"] = sanitize_utf8(fmt::format(fmt, std::forward<Args>(args)...));
+  } catch (...) {
+    j["message"] = "Format error in log message";
+  }
+
+  // Olası bir serileştirme hatasına karşı son koruma kalkanı
+  try {
+    return j.dump();
+  } catch (...) {
+    return "{\"_is_suts\":true,\"event\":\"LOG_CRITICAL_ERROR\",\"message\":"
+           "\"JSON dump failed\"}";
+  }
 }
 
 class SutsFormatter : public spdlog::formatter {
@@ -70,6 +123,7 @@ class SutsFormatter : public spdlog::formatter {
 
     const char* env_p = std::getenv("ENV");
     const char* host = std::getenv("HOSTNAME");
+
     j["resource"] = {{"service.name", "stt-whisper-service"},
                      {"service.version", APP_VERSION},
                      {"service.env", env_p ? env_p : "production"},
@@ -99,10 +153,17 @@ class SutsFormatter : public spdlog::formatter {
     j["span_id"] = nullptr;
     j["tenant_id"] = nullptr;
     j["event"] = "LOG_EVENT";
-    j["message"] = payload;
+    j["message"] = sanitize_utf8(payload);
 
-    std::string out = j.dump() + "\n";
-    dest.append(out.data(), out.data() + out.size());
+    try {
+      std::string out = j.dump() + "\n";
+      dest.append(out.data(), out.data() + out.size());
+    } catch (...) {
+      std::string err =
+          "{\"schema_v\":\"1.0.0\",\"severity\":\"ERROR\",\"event\":\"LOG_"
+          "FATAL_ERROR\",\"message\":\"Failed to serialize final JSON\"}\n";
+      dest.append(err.data(), err.data() + err.size());
+    }
   }
 
   std::unique_ptr<spdlog::formatter> clone() const override {
@@ -111,6 +172,7 @@ class SutsFormatter : public spdlog::formatter {
 };
 }  // namespace suts
 
+// [ARCH-COMPLIANCE] C++ Makroları
 #define SUTS_INFO(event, tid, sid, ten, ...) \
   spdlog::info(suts::build(event, tid, sid, ten, __VA_ARGS__))
 #define SUTS_ERROR(event, tid, sid, ten, ...) \
