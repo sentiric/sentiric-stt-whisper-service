@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 # --- MERKEZİ VERSİYON YÖNETİMİ ---
-set(APP_VERSION "2.6.4")
+set(APP_VERSION "2.6.5")
 
 # CUDA tespiti ve Proje Tanımı
 if(DEFINED GGML_CUDA AND GGML_CUDA)
@@ -57,7 +57,7 @@ include(FetchContent)
 FetchContent_Declare(
   sentiric_contracts
   GIT_REPOSITORY https://github.com/sentiric/sentiric-contracts.git
-  GIT_TAG v1.20.6  # [ARCH-COMPLIANCE FIX]: Son sürüme güncellendi
+  GIT_TAG v1.20.8  # [ARCH-COMPLIANCE FIX]: Son sürüme güncellendi
 )
 FetchContent_MakeAvailable(sentiric_contracts)
 
