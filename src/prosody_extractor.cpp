@@ -151,9 +151,10 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples,
   float speech_rate =
       (duration_sec > 0) ? (float)peak_count / duration_sec : 0.0f;
 
-  // --- CİNSİYET TESPİTİ ---
-  if (out.pitch_mean == 0.0f) {
-    out.gender_proxy = "?";
+  // --- CİNSİYET TESPİTİ (GÜNCELLENDİ: FISILTI KORUMASI) ---
+  if (out.pitch_mean == 0.0f ||
+      out.energy_mean < 0.018f) {  // 0.018: Fısıltı/Gürültü eşiği
+    out.gender_proxy = "?";        // Tanımlanamayan ses veya fısıltı
   } else {
     if (out.zero_crossing_rate < 0.030f)
       out.gender_proxy = "M";
@@ -185,20 +186,21 @@ AffectiveTags extract_prosody(const float* pcm_data, size_t n_samples,
     out.emotion_proxy = "neutral";
 
   // -------------------------------------------------------------------------
-  // 🛠️ [ARCH-COMPLIANCE FIX]: KATI VEKTÖR KUTUPLAŞTIRMA (Strict Polarization)
+  // 🛠️ [ARCH-COMPLIANCE FIX]: FISILTIYA DUYARLI VEKTÖR POLARİZASYONU
   // -------------------------------------------------------------------------
   out.speaker_vec.resize(8);
 
-  // 1. Temel Ses İmzası (Pitch) - Cinsiyete Göre Zorunlu Sıkıştırma
   float base_pitch_norm;
   if (out.gender_proxy == "M") {
-    // Erkek havuzu: [0.0 - 0.4] aralığına hapset. Ne kadar bağırırsa bağırsın
-    // 0.4'ü geçemez.
-    base_pitch_norm = soft_norm(out.pitch_mean, 60.0f, 200.0f) * 0.4f;
+    base_pitch_norm =
+        soft_norm(out.pitch_mean, 60.0f, 200.0f) * 0.4f;  // [0.0 - 0.4]
   } else if (out.gender_proxy == "F") {
-    // Kadın havuzu: [0.6 - 1.0] aralığına it.
-    base_pitch_norm = 0.6f + (soft_norm(out.pitch_mean, 160.0f, 350.0f) * 0.4f);
+    base_pitch_norm = 0.6f + (soft_norm(out.pitch_mean, 160.0f, 350.0f) *
+                              0.4f);  // [0.6 - 1.0]
   } else {
+    // [YENİ]: Fısıltı veya Belirsiz Ses Durumu
+    // Vektörü 0.5 (Tam orta / Nötr) bölgesine çekiyoruz.
+    // Böylece s_0'dan (0.11) s_1'e (0.89) zıplamak yerine 0.5'te kalacak.
     base_pitch_norm = 0.5f;
   }
 
