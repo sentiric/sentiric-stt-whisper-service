@@ -11,6 +11,7 @@
 #include "prosody_extractor.h"
 #include "spdlog/spdlog.h"
 #include "speaker_cluster.h"
+#include "suts_logger.h"
 #include "utils.h"
 
 static bool whisper_abort_callback_wrapper(void* user_data) {
@@ -269,7 +270,10 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
       // [GÜVENLİK] Yasaklı kelimeleri ve kısa anlamsız sesleri (Pffft, Hıhı)
       // filtrele
       if (sentiric::utils::is_hallucination(text)) {
-        spdlog::warn("🚫 Hallucination filtered (utils): '{}'", text);
+        // [ARCH-COMPLIANCE] WARN -> DEBUG (Sessizlik anlarında çok sık
+        // tetikleniyor)
+        SUTS_DEBUG("STT_HALLUCINATION_FILTERED", "", "", "",
+                   "🚫 Hallucination filtered (phrase match): '{}'", text);
         continue;
       }
 
@@ -299,8 +303,10 @@ std::vector<TranscriptionResult> SttEngine::transcribe(
 
       // Eğer model emin değilse (%40 altı) sessiz kalması daha iyidir.
       if (avg_prob < MIN_AVG_TOKEN_PROB && valid_token_count > 0) {
-        spdlog::warn("🚫 Hallucination filtered (low probability {:.2f}): '{}'",
-                     avg_prob, text);
+        // [ARCH-COMPLIANCE] WARN -> DEBUG
+        SUTS_DEBUG("STT_PROBABILITY_FILTERED", "", "", "",
+                   "🚫 Filtered low probability ({:.2f}): '{}'", avg_prob,
+                   text);
         continue;
       }
 
