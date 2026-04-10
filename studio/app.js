@@ -206,6 +206,17 @@ const UI = {
     conversationHistory: [],
     globalTimeOffset: 0.0,
 
+    // [EKLENEN]: Sabit Oturum ID'leri
+    sessionTraceId: 'studio-trace-' + crypto.randomUUID(),
+    sessionSessionId: 'studio-sess-' + crypto.randomUUID(),
+
+    // [EKLENEN]: Crystalline Simülatörü (UI State)
+    mockCrystallineState: {
+        lastArousal: 0,
+        lastValence: 0,
+        currentMood: 'neutral'
+    },
+
     init() {
         const tog = (side, s) => { $(`#sidebar${side}`).classList.toggle('active', s); $(`#overlay${side}`).classList.toggle('active', s); };
         $('#mobLeftBtn').onclick = () => tog('Left', true); $('#mobRightBtn').onclick = () => tog('Right', true);
@@ -317,11 +328,14 @@ const UI = {
                 method: 'POST', 
                 headers: {
                     'x-tenant-id': 'sentiric_studio',
-                    'x-trace-id': 'ui-req-' + Date.now()
+                    'x-trace-id': this.sessionTraceId,     // ARTIK SABİT
+                    'x-span-id': crypto.randomUUID()       // SPAN her istekte değişir
                 },
                 body: fd 
             });
+
             const d = await r.json(); this.removeLoading(tempId);
+            
             if(r.ok) {
                 const url = URL.createObjectURL(blob);
                 if (!d.segments || d.segments.length === 0) { this.showToast("⚠️ Ses algılandı ama metin çözülemedi."); return; }
@@ -357,6 +371,22 @@ const UI = {
 
             const spk = Speaker.identify(seg.speaker_vec, {gender: seg.gender});
             
+            // [MİMARİ DOKUNUŞ]: Crystalline Simülasyonu (Sadece UI Debug için)
+            if (this.mockCrystallineState.lastArousal > 0) {
+                const arousalDiff = Math.abs(seg.arousal - this.mockCrystallineState.lastArousal);
+                const moodChanged = seg.emotion !== this.mockCrystallineState.currentMood;
+                
+                // Eğer ciddi bir kayma varsa veya öfkelendiyse UI'da Drift uyarısı bas
+                if ((arousalDiff > 0.15 || moodChanged) && seg.emotion !== 'neutral') {
+                    this.showDriftAlert(seg.emotion, arousalDiff, spk.name);
+                }
+            }
+
+            // State'i güncelle
+            this.mockCrystallineState.lastArousal = seg.arousal;
+            this.mockCrystallineState.lastValence = seg.valence;
+            this.mockCrystallineState.currentMood = seg.emotion;            
+
             this.conversationHistory.push({
                 speaker_name: spk.name,
                 speaker_id: spk.id,
@@ -422,6 +452,19 @@ const UI = {
             requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
         }
         return renderedCount;
+    },
+
+    showDriftAlert(newMood, shiftAmt, spkName) {
+        const c = $('#transcriptFeed');
+        const color = newMood === 'angry' ? '#ef4444' : newMood === 'excited' ? '#f59e0b' : '#3b82f6';
+        const emoji = newMood === 'angry' ? '😡' : newMood === 'excited' ? '🤩' : '🧘';
+        
+        const alertHtml = `
+        <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid ${color}; color: ${color}; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 11px; font-family: monospace; animation: pulse 1s infinite; text-align: center; max-width: 900px; margin-left: auto; margin-right: auto;">
+            ${emoji} [${spkName}] AKUSTİK ANOMALİ: Ruh hali <b>${newMood.toUpperCase()}</b> olarak değişti! (Fark: ${shiftAmt.toFixed(2)})
+        </div>`;
+        
+        c.insertAdjacentHTML('beforeend', alertHtml);
     },
 
     play(el, url, offset) {
