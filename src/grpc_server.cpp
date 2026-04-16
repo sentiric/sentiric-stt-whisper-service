@@ -225,50 +225,76 @@ grpc::Status GrpcServer::WhisperTranscribeStream(
 
       try {
         auto results = engine_->transcribe_pcm16(buffer, 16000, options, &perf);
-        last_processed_size =
-            buffer.size();  // Sadece işlenen imleci kaydır, temizleme!
+        last_processed_size = buffer.size();
+
+        // [MİMARİ DÜZELTME]: Partial mesajlarda (Kullanıcı hala konuşurken)
+        // Whisper birden fazla segment bulursa, UI bunları tek tek alıp ezmesin
+        // diye Hepsini tek bir string olarak birleştirip gönderiyoruz.
+        std::string combined_partial_text;
+        sentiric::stt::v1::WhisperTranscribeStreamResponse combined_response;
+        bool has_valid_data = false;
 
         for (const auto& res : results) {
           if (!res.text.empty()) {
-            sentiric::stt::v1::WhisperTranscribeStreamResponse response;
-            response.set_transcription(res.text);
-            // [KRİTİK]: Cümle henüz bitmedi! (Yazıyor efekti)
-            response.set_is_final(false);
+            combined_partial_text += res.text + " ";
+            has_valid_data = true;
 
+            // Son segmentin duygu durumunu ve vektörünü al (En güncel olan)
             const auto& aff = res.affective;
-            response.set_gender_proxy(aff.gender_proxy);
-            response.set_emotion_proxy(aff.emotion_proxy);
-            response.set_arousal(aff.arousal);
-            response.set_valence(aff.valence);
-            response.set_pitch_mean(aff.pitch_mean);
-            response.set_pitch_std(aff.pitch_std);
-            response.set_energy_mean(aff.energy_mean);
-            response.set_energy_std(aff.energy_std);
-            response.set_spectral_centroid(aff.spectral_centroid);
-            response.set_zero_crossing_rate(aff.zero_crossing_rate);
-            for (float v : aff.speaker_vec) response.add_speaker_vec(v);
-            response.set_speaker_id(res.speaker_id);
+            combined_response.set_gender_proxy(aff.gender_proxy);
+            combined_response.set_emotion_proxy(aff.emotion_proxy);
+            combined_response.set_arousal(aff.arousal);
+            combined_response.set_valence(aff.valence);
+            combined_response.set_pitch_mean(aff.pitch_mean);
+            combined_response.set_pitch_std(aff.pitch_std);
+            combined_response.set_energy_mean(aff.energy_mean);
+            combined_response.set_energy_std(aff.energy_std);
+            combined_response.set_spectral_centroid(aff.spectral_centroid);
+            combined_response.set_zero_crossing_rate(aff.zero_crossing_rate);
 
-            for (const auto& token : res.tokens) {
-              auto* word_data = response.add_words();
-              word_data->set_word(token.text);
-              word_data->set_start(static_cast<float>(token.t0) / 100.0f);
-              word_data->set_end(static_cast<float>(token.t1) / 100.0f);
-              word_data->set_probability(token.p);
-            }
+            combined_response.clear_speaker_vec();
+            for (float v : aff.speaker_vec)
+              combined_response.add_speaker_vec(v);
 
-            if (!stream->Write(response)) {
-              return grpc::Status::OK;
-            }
+            combined_response.set_speaker_id(res.speaker_id);
           }
         }
 
-        // OOM Koruması
+        if (has_valid_data) {
+          combined_response.set_transcription(combined_partial_text);
+          combined_response.set_is_final(false);  // Hala konuşuyor
+          if (!stream->Write(combined_response)) {
+            return grpc::Status::OK;
+          }
+        }
+
+        // [KRİTİK VERİ KAYBI ÇÖZÜMÜ]: OOM Koruması (30 Saniye Sınırı)
+        // Kullanıcı 30sn susmadan konuşursa, buffer'ı silmeden önce her şeyi
+        // FINAL olarak kaydet!
         if (buffer.size() > MAX_BUFFER_SIZE) {
+          SUTS_WARN("STT_BUFFER_OVERFLOW", trace_id, span_id, tenant_id,
+                    "User spoke for 30s without breathing. Forcing "
+                    "finalization to prevent data loss.");
+
+          for (const auto& res : results) {
+            if (!res.text.empty()) {
+              sentiric::stt::v1::WhisperTranscribeStreamResponse final_resp;
+              final_resp.set_transcription(res.text);
+              final_resp.set_is_final(true);  // ZORLA FİNAL YAP
+
+              const auto& aff = res.affective;
+              final_resp.set_gender_proxy(aff.gender_proxy);
+              final_resp.set_emotion_proxy(aff.emotion_proxy);
+              final_resp.set_arousal(aff.arousal);
+              final_resp.set_valence(aff.valence);
+              final_resp.set_speaker_id(res.speaker_id);
+              for (float v : aff.speaker_vec) final_resp.add_speaker_vec(v);
+
+              stream->Write(final_resp);
+            }
+          }
           buffer.clear();
           last_processed_size = 0;
-          SUTS_WARN("STT_BUFFER_OVERFLOW", trace_id, span_id, tenant_id,
-                    "Buffer exceeded 30s limit. Forcing flush.");
         }
 
       } catch (const std::exception& e) {
